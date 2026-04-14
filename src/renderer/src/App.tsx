@@ -1,0 +1,64 @@
+import { HashRouter, BrowserRouter, Routes, Route } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { AppShell }       from '@/components/layout/AppShell'
+import Dashboard          from '@/pages/Dashboard'
+import CategoriesPage     from '@/pages/categories/CategoriesPage'
+import SuppliersPage      from '@/pages/suppliers/SuppliersPage'
+import MaterialsPage      from '@/pages/materials/MaterialsPage'
+import PriceHistoryPage, { PlaceholderPage } from '@/pages/price-history/PriceHistoryPage'
+import MarginsPage        from '@/pages/margins/MarginsPage'
+import ProductsPage       from '@/pages/products/ProductsPage'
+import CurrencyPage       from '@/pages/currency/CurrencyPage'
+import VatCheckerPage     from '@/pages/vat/VatCheckerPage'
+import ScenarioPage       from '@/pages/scenario/ScenarioPage'
+import SettingsPage       from '@/pages/settings/SettingsPage'
+import PackagingPage      from '@/pages/packaging/PackagingPage'
+import LabelsPage         from '@/pages/labels/LabelsPage'
+import CartonsPage        from '@/pages/cartons/CartonsPage'
+import { PlatformsPage, CustomersPage, DiscountsPage } from '@/pages/platforms/BusinessPages'
+import RecipesPage from '@/pages/recipes/RecipesPage'
+import { isElectron }     from '@/lib/api'
+import { useThemeStore, applyThemeToDom } from '@/store/themeStore'
+
+const Router = isElectron() ? HashRouter : BrowserRouter
+const qc = new QueryClient({
+  defaultOptions: { queries: { retry:1, staleTime:30_000, refetchOnWindowFocus:false } },
+})
+
+export default function App() {
+  const { active } = useThemeStore()
+  // Apply stored theme safely
+  try { if (typeof document !== 'undefined') applyThemeToDom(active) } catch {}
+
+  return (
+    <QueryClientProvider client={qc}>
+      <Router>
+        <Routes>
+          <Route element={<AppShell/>}>
+            <Route index                element={<Dashboard/>}/>
+            <Route path="categories"    element={<CategoriesPage/>}/>
+            <Route path="suppliers"     element={<SuppliersPage/>}/>
+            <Route path="materials"     element={<MaterialsPage/>}/>
+            <Route path="price-history" element={<PriceHistoryPage/>}/>
+            <Route path="products"      element={<ProductsPage/>}/>
+            <Route path="margins"       element={<MarginsPage/>}/>
+            <Route path="currency"      element={<CurrencyPage/>}/>
+            <Route path="vat"           element={<VatCheckerPage/>}/>
+            <Route path="scenario"      element={<ScenarioPage/>}/>
+            <Route path="packaging"     element={<PackagingPage/>}/>
+            <Route path="labels"        element={<LabelsPage/>}/>
+            <Route path="cartons"       element={<CartonsPage/>}/>
+            <Route path="platforms"     element={<PlatformsPage/>}/>
+            <Route path="payments"      element={<PlaceholderPage title="Zahlungsprofile" phase="wie Plattformprofile"/>}/>
+            <Route path="customers"     element={<CustomersPage/>}/>
+            <Route path="discounts"     element={<DiscountsPage/>}/>
+            <Route path="documents"     element={<PlaceholderPage title="Dokumentenablage"/>}/>
+            <Route path="components"    element={<RecipesPage/>}/>
+            <Route path="recipes"       element={<RecipesPage/>}/>
+            <Route path="settings"      element={<SettingsPage/>}/>
+          </Route>
+        </Routes>
+      </Router>
+    </QueryClientProvider>
+  )
+}
