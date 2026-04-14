@@ -45,6 +45,9 @@ export function applyThemeToDom(theme: ThemeConfig) {
     v('--scrollbar-w',  `${theme.scrollbarWidth}px`)
     v('--scrollbar-color', theme.scrollbarColor)
     v('--bg-app',       theme.bgPrimary)
+    // Always force dark background on body directly
+    if (document.body) document.body.style.background = theme.bgPrimary
+    document.documentElement.style.background = theme.bgPrimary
     // Animated border class
     theme.animatedBorder ? root.classList.add('animated-borders') : root.classList.remove('animated-borders')
   } catch {}
@@ -75,7 +78,16 @@ function loadProfiles(): ThemeConfig[] {
   return [getDefaultTheme()]
 }
 
-const initialTheme = loadSaved()
+const initialTheme = (() => {
+  const saved = loadSaved()
+  // Safety: if background looks wrong (too bright or blue), reset to default
+  const bg = saved.bgPrimary || ''
+  if (!bg.startsWith('#0') && !bg.startsWith('#1') && bg !== '#0c0e1a') {
+    try { localStorage.removeItem('dipon-theme-active') } catch {}
+    return getDefaultTheme()
+  }
+  return saved
+})()
 // Theme sofort beim Laden anwenden
 if (typeof document !== 'undefined') applyThemeToDom(initialTheme)
 

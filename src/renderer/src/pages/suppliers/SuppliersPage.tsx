@@ -92,8 +92,7 @@ function SupplierMaterialsDrawer({supplier, onClose}:{supplier:any; onClose:()=>
 
   return(
     <div className="fixed inset-0 flex justify-end" style={{zIndex:9999,background:'rgb(0 0 0/0.5)',left:0,top:0,right:0,bottom:0}}>
-      <div className="h-full flex flex-col shadow-2xl overflow-hidden" style={{width:680,maxWidth:'calc(100vw - 40px)'}}
-        style={{background:'#0f1124',borderLeft:'1px solid rgb(139 92 246/0.2)'}}>
+      <div className="h-full flex flex-col shadow-2xl overflow-hidden" style={{width:680,maxWidth:'calc(100vw - 40px)',background:'#0f1124',borderLeft:'1px solid rgb(139 92 246/0.2)'}}>
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-white/5 shrink-0">
           <div className="flex items-center gap-3">

@@ -1,7 +1,7 @@
 {
   "name": "dipon-pim",
   "version": "1.0.0",
-  "description": "DIPON PIM \u2013 Lokale Desktop & Web App",
+  "description": "DIPON PIM – Lokale Desktop & Web App",
   "main": "./out/main/index.js",
   "author": "DIPON.DE GmbH & Co. KG",
   "scripts": {
@@ -20,7 +20,8 @@
     "cors": "^2.8.5",
     "electron-updater": "^6.1.8",
     "express": "^4.18.3",
-    "flag-icons": "^7.5.0"
+    "flag-icons": "^7.5.0",
+    "react-grid-layout": "^2.2.3"
   },
   "devDependencies": {
     "@tanstack/react-query": "^5.28.4",
@@ -30,6 +31,7 @@
     "@types/node": "^20.11.24",
     "@types/react": "^18.2.67",
     "@types/react-dom": "^18.2.22",
+    "@types/react-grid-layout": "^1.3.6",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.18",
     "concurrently": "^8.2.2",
@@ -50,7 +52,7 @@
   "build": {
     "appId": "de.dipon.pim",
     "productName": "DIPON PIM",
-    "copyright": "\u00a9 DIPON.DE GmbH & Co. KG",
+    "copyright": "© DIPON.DE GmbH & Co. KG",
     "directories": {
       "buildResources": "resources",
       "output": "release"

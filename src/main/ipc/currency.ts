@@ -2,7 +2,7 @@ import { ipcMain, net } from 'electron'
 import { getDb }        from '../database/setup'
 
 // Frankfurter.app – kostenlos, kein API-Key, ECB-Daten
-const BASE_URL = 'https://api.frankfurter.app'
+const BASE_URL = 'https://api.frankfurter.dev/v1'
 
 const SUPPORTED_CURRENCIES = [
   {code:'EUR',name:'Euro',                symbol:'€',  flag:'🇪🇺',country:'Europäische Union'},

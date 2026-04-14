@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
 const api = {
-  dashboard:    { stats: () => ipcRenderer.invoke('dashboard:stats') },
+  dashboard:    { stats: () => ipcRenderer.invoke('dashboard:stats'), getStats: () => ipcRenderer.invoke('dashboard:stats'), getCurrency: () => ipcRenderer.invoke('dashboard:currency') },
   categories: {
     list:   () => ipcRenderer.invoke('categories:list'),
     get:    (id: number) => ipcRenderer.invoke('categories:get', id),

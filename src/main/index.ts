@@ -33,7 +33,7 @@ function createWindow(): void {
   win.webContents.once('did-finish-load', async () => {
     try {
       // Nur wenn online – net ist bereits in electron verfügbar
-      const test = net.request('https://api.frankfurter.app/latest?from=EUR')
+      const test = net.request('https://api.frankfurter.dev/latest?from=EUR')
       test.on('response', res => {
         let body = ''
         res.on('data', chunk => body += chunk.toString())
@@ -88,7 +88,7 @@ app.whenReady().then(() => {
           "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
           "style-src 'self' 'unsafe-inline'; " +
           "img-src 'self' data: blob: https://flagcdn.com https://cdn.jsdelivr.net https://upload.wikimedia.org; " +
-          "connect-src 'self' https://api.frankfurter.app https://ec.europa.eu https://evatr.bff-online.de; " +
+          "connect-src 'self' https://api.frankfurter.dev https://ec.europa.eu https://evatr.bff-online.de; " +
           "font-src 'self' data:;"
         ]
       }

@@ -267,7 +267,7 @@ function TopBar() {
 export function AppShell() {
   const {sidebarCollapsed}=useAppStore()
   return (
-    <div className="min-h-screen" style={{background:'var(--bg-app, #0c0e1a)'}}>
+    <div className="min-h-screen" style={{background:'#0c0e1a'}}>
       <div className="fixed inset-0 pointer-events-none z-0" style={{background:`
         radial-gradient(ellipse 60% 40% at 10% 0%, rgb(109 40 217 / 0.1) 0%, transparent 60%),
         radial-gradient(ellipse 40% 30% at 90% 10%, rgb(96 116 241 / 0.06) 0%, transparent 50%)`}}/>

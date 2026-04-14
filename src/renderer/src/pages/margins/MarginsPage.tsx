@@ -1,495 +1,676 @@
 /**
- * DIPON Margenkalkulation
- * Schrittweise Kalkulation: Rohstoffe → Rezept → Verpackung → Verkauf → Ergebnis
+ * DIPON Margenkalkulation – vollständiger Entwurf v2
+ * Ablauf: Produkt (2K) → Variante → Gebinde → Versand → Plattform → Ergebnis
  */
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  FlaskConical, Package, Tag, Box, Store, TrendingUp,
-  ChevronRight, ChevronDown, AlertCircle, CheckCircle,
-  Plus, Trash2, Calculator, Euro, Info,
+  Calculator, Package, Truck, Euro, ChevronDown, ChevronUp,
+  FlaskConical, AlertTriangle, CheckCircle, ArrowRight,
+  TrendingUp, ShoppingCart, Globe, Layers,
 } from 'lucide-react'
-import { Input, Select } from '@/components/ui/Input'
-import { Card } from '@/components/ui/Badge'
-import type {
-  MaterialPriceInput, TwoKProduct
-} from '@/lib/calc-engine'
-import {
-  calcMaterialPrice, calcTwoKProduct, calcProduct
-} from '@/lib/calc-engine'
+import { Select } from '@/components/ui/Input'
+import { COUNTRIES_SORTED as COUNTRIES } from '@/lib/countries'
 
-// ── Helpers ───────────────────────────────────────────────────
-const f2 = (v: number) => v.toFixed(2)
-const f4 = (v: number) => v.toFixed(4)
-const fEur = (v: number) => new Intl.NumberFormat('de-DE', { style:'currency', currency:'EUR', minimumFractionDigits:2 }).format(v)
-const fPct = (v: number) => `${v.toFixed(2)} %`
+// ── Formatierung ───────────────────────────────────────────────
+const f2 = (v: number) => v.toFixed(2).replace('.', ',')
+const f4 = (v: number) => v.toFixed(4).replace('.', ',')
+const fEur = (v: number) => `${f2(v)} €`
+const fPct = (v: number) => `${f2(v)} %`
 
-// ── Schritt-Anzeige ───────────────────────────────────────────
-function Step({ n, title, icon, active, done, children, onClick }: {
-  n:number; title:string; icon:React.ReactNode; active:boolean; done:boolean
-  children?:React.ReactNode; onClick:()=>void
+// ── Schritt-Komponente ─────────────────────────────────────────
+function Step({n,title,icon,done,active,children,onClick}: {
+  n:number; title:string; icon:React.ReactNode
+  done:boolean; active:boolean
+  children:React.ReactNode; onClick:()=>void
 }) {
   return (
-    <div className={`glass-card overflow-hidden transition-all ${active?'ring-1 ring-brand-500/40':''}`}>
-      <div className="flex items-center gap-3 p-4 cursor-pointer hover:bg-white/3" onClick={onClick}>
-        <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm font-black shrink-0 ${done?'bg-emerald-500/20 text-emerald-400':active?'bg-brand-500/20 text-brand-400':'bg-white/5 text-slate-600'}`}>
-          {done ? <CheckCircle size={16}/> : n}
+    <div className="rounded-2xl overflow-hidden transition-all"
+      style={{border: active ? '1px solid rgb(139 92 246/0.4)' : done ? '1px solid rgb(16 185 129/0.3)' : '1px solid rgba(255,255,255,0.06)',
+        background: active ? 'rgb(139 92 246/0.05)' : 'rgba(255,255,255,0.02)'}}>
+      <button className="w-full flex items-center gap-3 px-5 py-4 text-left" onClick={onClick}>
+        <div className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black shrink-0"
+          style={{background: active?'rgb(139 92 246/0.3)':done?'rgb(16 185 129/0.2)':'rgba(255,255,255,0.05)',
+            color: active?'#a78bfa':done?'#10b981':'#64748b'}}>
+          {done ? <CheckCircle size={14}/> : n}
         </div>
-        <div className="flex items-center gap-2 flex-1">
-          <span className={active?'text-brand-400':'text-slate-400'}>{icon}</span>
-          <span className={`text-sm font-bold ${active?'text-white':done?'text-slate-300':'text-slate-500'}`}>{title}</span>
-        </div>
-        {active ? <ChevronDown size={15} className="text-slate-500"/> : <ChevronRight size={15} className="text-slate-600"/>}
+        <span style={{color:active?'#a78bfa':done?'#10b981':'#64748b'}}>{icon}</span>
+        <span className={`text-sm font-semibold ${active?'text-white':done?'text-slate-300':'text-slate-500'}`}>{title}</span>
+        <div className="ml-auto">{active ? <ChevronUp size={14} className="text-slate-500"/> : <ChevronDown size={14} className="text-slate-600"/>}</div>
+      </button>
+      {active && <div className="px-5 pb-5">{children}</div>}
+    </div>
+  )
+}
+
+// ── Kosten-Zeile ───────────────────────────────────────────────
+function CostRow({label, value, sub, color, bold}: {label:string;value:number;sub?:string;color?:string;bold?:boolean}) {
+  return (
+    <div className={`flex items-center justify-between py-1.5 ${bold?'border-t border-white/10 mt-1 pt-2':''}`}>
+      <div>
+        <span className={`text-xs ${bold?'text-slate-200 font-bold':'text-slate-400'}`}>{label}</span>
+        {sub && <span className="text-[10px] text-slate-600 ml-2">{sub}</span>}
       </div>
-      {active && children && <div className="px-4 pb-5 border-t border-white/5">{children}</div>}
-    </div>
-  )
-}
-
-// ── Ergebnis-Zeile ────────────────────────────────────────────
-function ResultRow({ label, value, color='text-slate-300', bold=false, indent=0, note }:
-  { label:string; value:string; color?:string; bold?:boolean; indent?:number; note?:string }) {
-  return (
-    <div className={`flex items-center justify-between py-1.5 ${indent>0?'pl-'+indent*4:''}`}>
-      <span className={`text-xs text-slate-500 flex items-center gap-1.5 ${indent>0?'pl-3 border-l border-white/8':''}`}>
-        {label}
-        {note && <span className="text-slate-600" title={note}><Info size={10}/></span>}
+      <span className={`text-sm font-mono ${bold?'font-black text-white':'font-semibold'}`}
+        style={{color: color || (bold?'white':'#94a3b8')}}>
+        {fEur(value)}
       </span>
-      <span className={`text-sm font-mono ${bold?'font-bold text-base':''} ${color}`}>{value}</span>
     </div>
   )
 }
 
-// ── Haupt-Kalkulation ─────────────────────────────────────────
+// ── Hauptseite ────────────────────────────────────────────────
 export default function MarginsPage() {
-  const [activeStep, setActiveStep] = useState(0)
-  const [selectedProductId, setSelectedProductId] = useState<number|null>(null)
-  const [manualCostPerKg, setManualCostPerKg] = useState<number>(0)
-  const [showGross, setShowGross]   = useState(false)
+  const [step, setStep] = useState(0)
 
-  // Schritt 1: Rohstoff-Preis
-  const [matPrice, setMatPrice] = useState<MaterialPriceInput>({
-    base_price:1000, base_quantity:1000, base_unit:'kg',
-    adr_enabled:false, adr_amount:0, adr_per_qty:100, adr_unit:'kg',
-    env_enabled:false, env_amount:0, env_type:'per_unit',
-    transport_enabled:false, transport_amount:0, transport_freight_kg:1000,
-    custom_fees:[], vat_rate:19,
+  // Schritt 1: Produkt
+  const [productId,  setProductId]  = useState<number|null>(null)
+  const [variantId,  setVariantId]  = useState<number|null>(null)
+
+  // Schritt 2: Rezeptur-Preise
+  const [compAPriceKg, setCompAPriceKg] = useState<number>(0)
+  const [compBPriceKg, setCompBPriceKg] = useState<number>(0)
+
+  // Schritt 3: Gebinde
+  const [packAId,  setPackAId]  = useState<number|null>(null)
+  const [packBId,  setPackBId]  = useState<number|null>(null)
+  const [lidAId,   setLidAId]   = useState<number|null>(null)
+  const [lidBId,   setLidBId]   = useState<number|null>(null)
+  const [labelAId, setLabelAId] = useState<number|null>(null)
+  const [cartonId, setCartonId] = useState<number|null>(null)
+  const [unitsPerCarton, setUnitsPerCarton] = useState(1)
+
+  // Schritt 4: Versand
+  const [country,      setCountry]      = useState('DE')
+  const [weightKg,     setWeightKg]     = useState<number>(0)
+  const [shippingCost, setShippingCost] = useState<number>(0)
+
+  // Schritt 5: Plattform & Marge
+  const [platformFeeP, setPlatformFeeP] = useState<number>(0)
+  const [platformFeeF, setPlatformFeeF] = useState<number>(0)
+  const [paymentFeeP,  setPaymentFeeP]  = useState<number>(0)
+  const [vatRate,      setVatRate]      = useState<number>(19)
+  const [targetMargin, setTargetMargin] = useState<number>(30)
+  const [customPrice,  setCustomPrice]  = useState<number>(0)
+  const [useCustomPrice, setUseCustomPrice] = useState(false)
+
+  // ── Queries ────────────────────────────────────────────────
+  const {data: products2k=[]} = useQuery<any[]>({
+    queryKey:['products2k'],
+    queryFn: async () => { try { return await window.api.products.list() ?? [] } catch { return [] } },
+    staleTime: 30_000,
   })
-  const [customFeeForm, setCustomFeeForm] = useState({name:'',amount:'',type:'per_unit' as const})
-  const matResult = useMemo(() => calcMaterialPrice(matPrice), [matPrice])
-  const mp = (k: keyof MaterialPriceInput, v: unknown) => setMatPrice(p => ({...p, [k]: v}))
+  const {data: products=[]} = useQuery<any[]>({
+    queryKey:['products'],
+    queryFn: () => window.api.products.list(),
+    staleTime: 30_000,
+  })
+  const {data: packaging=[]} = useQuery<any[]>({
+    queryKey:['packaging'],
+    queryFn: () => window.api.packaging.list(),
+    staleTime: 30_000,
+  })
+  const {data: lids=[]} = useQuery<any[]>({
+    queryKey:['lids'],
+    queryFn: async () => {
+      try { return await window.api.lids?.list?.() ?? [] } catch { return [] }
+    },
+    staleTime: 30_000,
+  })
+  const {data: labels=[]} = useQuery<any[]>({
+    queryKey:['labels'],
+    queryFn: async () => { try { return await window.api.labels.list() ?? [] } catch { return [] } },
+    staleTime: 30_000,
+  })
+  const {data: cartons=[]} = useQuery<any[]>({
+    queryKey:['cartons'],
+    queryFn: async () => { try { return await window.api.cartons.list() ?? [] } catch { return [] } },
+    staleTime: 30_000,
+  })
+  const {data: platforms=[]} = useQuery<any[]>({
+    queryKey:['platforms'],
+    queryFn: async () => { return [] },
+    staleTime: 30_000,
+  })
 
-  // Schritt 2: Rezept-Positionen
-  const [recipePositions, setRecipePositions] = useState<Array<{
-    id:number; name:string; quantity_kg:number; price_per_kg:number
-  }>>([])
-  const [recipeForm, setRecipeForm] = useState({name:'',quantity_kg:'',price_per_kg:''})
-  const totalRecipeKg    = recipePositions.reduce((s,p) => s+p.quantity_kg, 0)
-  const totalRecipeCost  = recipePositions.reduce((s,p) => s+p.quantity_kg*p.price_per_kg, 0)
-  const costPerKgRecipe  = totalRecipeKg > 0 ? totalRecipeCost / totalRecipeKg : 0
-  const recipePercentages = recipePositions.map(p => ({ ...p, pct: totalRecipeKg > 0 ? (p.quantity_kg/totalRecipeKg)*100 : 0 }))
-  const pctSum = recipePercentages.reduce((s,p) => s+p.pct, 0)
-  const pctOk  = Math.abs(pctSum - 100) < 0.01 || recipePositions.length === 0
+  // ── Ausgewähltes Produkt ───────────────────────────────────
+  const selectedProduct = useMemo(()=>
+    (products2k as any[]).find((p:any)=>p.id===productId) ??
+    (products as any[]).find((p:any)=>p.id===productId) ?? null
+  ,[products2k, products, productId])
 
-  // Schritt 3: 2K Mischung
-  const {data:allProducts=[]}=useQuery<any[]>({queryKey:['products'],queryFn:()=>window.api.products.list() as Promise<any[]>})
-  const {data:productDetail}=useQuery<any>({queryKey:['product-detail',selectedProductId],queryFn:()=>selectedProductId?window.api.products.get(selectedProductId):null,enabled:!!selectedProductId})
-  const selectedProduct=(allProducts as any[]).find((p:any)=>p.id===selectedProductId)??null
-  const productTotalCost=useMemo(()=>(productDetail?.materials??[]).reduce((s:number,m:any)=>s+(m.pref_price??0)*m.quantity,0),[productDetail])
-  const productCostPerKg=useMemo(()=>{
-    if(productTotalCost>0&&selectedProduct?.batch_size>0) return productTotalCost/selectedProduct.batch_size
-    return manualCostPerKg
-  },[productTotalCost,selectedProduct,manualCostPerKg])
+  const selectedVariant = useMemo(()=>
+    selectedProduct?.variants?.find((v:any)=>v.id===variantId) ?? null
+  ,[selectedProduct, variantId])
 
-  const [use2k, setUse2k]   = useState(false)
-  const [twoK, setTwoK]     = useState<TwoKProduct>({ comp_a_cost_per_kg:0, comp_b_cost_per_kg:0, ratio_a:100, ratio_b:50 })
-  const twoKResult = useMemo(() => calcTwoKProduct(twoK), [twoK])
+  // ── Mischungsverhältnis ────────────────────────────────────
+  const mixA = selectedProduct?.mix_ratio_a ?? 100
+  const mixB = selectedProduct?.mix_ratio_b ?? 50
+  const mixTotal = mixA + mixB
+  const ratioA = mixA / mixTotal  // z.B. 0.667 bei 2:1
+  const ratioB = mixB / mixTotal  // z.B. 0.333 bei 2:1
 
-  // Schritt 4: Verpackung
-  const [pack, setPack] = useState({ fill_kg:1.5, pkg_cost:0, lid_cost:0, label_cost:0, carton_cost:0, overhead_pct:5 })
-  const pk = (k: keyof typeof pack, v: number) => setPack(p => ({...p, [k]: v}))
+  const totalKg     = selectedVariant?.total_fill_kg ?? selectedVariant?.fill_quantity ?? 0
+  const kgA         = totalKg * ratioA
+  const kgB         = totalKg * ratioB
 
-  // Schritt 5: Verkauf
-  const [sell, setSell] = useState({ price_net:0, vat:19, platform_pct:0, platform_fix:0, payment_pct:0, payment_fix:0, discount_pct:0 })
-  const sk = (k: keyof typeof sell, v: number) => setSell(s => ({...s, [k]: v}))
+  // ── Kosten berechnen ──────────────────────────────────────
+  const costA       = kgA * compAPriceKg
+  const costB       = kgB * compBPriceKg
+  const costFilling = costA + costB
 
-  // Material-Kosten für Kalkulation
-  const materialCostForCalc = use2k ? twoKResult.cost_per_kg_set : costPerKgRecipe || productCostPerKg
+  const packA  = (packaging as any[]).find((p:any)=>p.id===packAId)
+  const packB  = (packaging as any[]).find((p:any)=>p.id===packBId)
+  const lidA   = (lids     as any[]).find((l:any)=>l.id===lidAId)
+  const lidB   = (lids     as any[]).find((l:any)=>l.id===lidBId)
+  const labelA = (labels   as any[]).find((l:any)=>l.id===labelAId)
+  const carton = (cartons  as any[]).find((c:any)=>c.id===cartonId)
 
-  // Gesamtkalkulation
-  const result = useMemo(() => {
-    if (!sell.price_net) return null
-    return calcProduct({
-      material_cost_per_kg:  materialCostForCalc,
-      packaging_cost:        pack.pkg_cost,
-      lid_cost:              pack.lid_cost,
-      label_cost:            pack.label_cost,
-      carton_cost:           pack.carton_cost,
-      fill_weight_kg:        pack.fill_kg,
-      overhead_pct:          pack.overhead_pct,
-      labor_cost_per_unit:   0,
-      selling_price_net:     sell.price_net,
-      vat_rate:              sell.vat,
-      platform_fee_pct:      sell.platform_pct,
-      platform_fee_fixed:    sell.platform_fix,
-      payment_fee_pct:       sell.payment_pct,
-      payment_fee_fixed:     sell.payment_fix,
-      discount_pct:          sell.discount_pct,
-    })
-  }, [materialCostForCalc, pack, sell])
+  const costPackA   = (packA?.price_per_unit ?? 0)
+  const costPackB   = (packB?.price_per_unit ?? 0)
+  const costLidA    = (lidA?.price_per_unit ?? 0)
+  const costLidB    = (lidB?.price_per_unit ?? 0)
+  const costLabel   = (labelA?.price_per_unit ?? labelA?.price_per_1000 ? (labelA.price_per_1000/1000) : 0)
+  const costCarton  = cartonId && unitsPerCarton > 0 ? (carton?.price_per_unit ?? 0) / unitsPerCarton : 0
+
+  const costPackaging = costPackA + costPackB + costLidA + costLidB + costLabel + costCarton
+  const costSelf      = costFilling + costPackaging
+
+  // ── Bruttogewicht für Versand ──────────────────────────────
+  const taraA = (packA?.tare_weight_g ?? packA?.weight_g ?? 0) / 1000
+  const taraB = (packB?.tare_weight_g ?? packB?.weight_g ?? 0) / 1000
+  const lidAW = (lidA?.weight_g ?? 0) / 1000
+  const lidBW = (lidB?.weight_g ?? 0) / 1000
+  const cartonW = cartonId ? (carton?.weight_g ?? 0) / 1000 / Math.max(unitsPerCarton,1) : 0
+  const bruttoKg = totalKg + taraA + taraB + lidAW + lidBW + cartonW
+
+  // ── Verkaufspreisberechnung ────────────────────────────────
+  const baseCost = costSelf + shippingCost
+
+  const calcNetPrice = (margin: number) => {
+    const mf = margin / 100
+    if (mf >= 1) return baseCost * 2
+    return baseCost / (1 - mf)
+  }
+
+  const netSuggested  = calcNetPrice(targetMargin)
+  const netPrice      = useCustomPrice ? customPrice : netSuggested
+  const platformFee   = netPrice * (platformFeeP/100) + platformFeeF
+  const paymentFee    = netPrice * (paymentFeeP/100)
+  const grossPrice    = netPrice * (1 + vatRate/100)
+  const netAfterFees  = netPrice - platformFee - paymentFee
+  const marginAbs     = netAfterFees - baseCost
+  const marginPct     = netAfterFees > 0 ? (marginAbs / netAfterFees) * 100 : 0
+  const db            = netAfterFees - costSelf // Deckungsbeitrag
+
+  const hasData = costSelf > 0
 
   return (
-    <div className="max-w-4xl">
-      <div className="page-header">
+    <div>
+      <div className="page-header mb-6">
         <div>
           <h2 className="page-title">Margenkalkulation</h2>
-          <p className="page-subtitle">Schritt für Schritt von Rohstoffen bis zum Verkaufsergebnis</p>
+          <p className="page-subtitle">Selbstkosten · Preisfindung · Deckungsbeitrag</p>
         </div>
-        <button onClick={() => setShowGross(v=>!v)}
-          className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border ${showGross?'bg-emerald-500/20 border-emerald-500/30 text-emerald-400':'bg-white/5 border-white/10 text-slate-400'}`}>
-          {showGross ? '✓ Brutto' : 'Brutto anzeigen'}
-        </button>
       </div>
 
-      <div className="space-y-3">
-        {/* ── SCHRITT 1: Rohstoff aus Datenbank wählen ── */}
-        <Step n={1} title="Produkt auswählen" icon={<Package size={14}/>}
-          active={activeStep===0} done={materialCostForCalc>0 && activeStep>0}
-          onClick={() => setActiveStep(activeStep===0?-1:0)}>
-          <div className="mt-4 space-y-4">
-            <p className="text-xs text-slate-500 p-3 rounded-xl"
-              style={{background:'rgb(139 92 246/0.06)',border:'1px solid rgb(139 92 246/0.15)'}}>
-              💡 Wähle ein fertiges Produkt. Der Herstellpreis wird automatisch aus der Rezeptur (Rohstoffe) berechnet.
-              Produkte ohne Rezept zeigen nur den manuellen EK-Preis.
-            </p>
-            <Select label="Produkt auswählen *" value={selectedProductId||''}
-              onChange={e=>setSelectedProductId(Number(e.target.value)||null)}>
-              <option value="">– Produkt wählen –</option>
-              {(allProducts as any[]).map((p:any)=>(
-                <option key={p.id} value={p.id}>
-                  {p.name} ({p.code})
-                  {p.material_count>0 ? ` — ${p.material_count} Rohstoffe` : ' — kein Rezept'}
-                </option>
-              ))}
-            </Select>
-            {selectedProduct && (
-              <div className="p-4 rounded-xl space-y-3" style={{background:'rgb(139 92 246/0.08)',border:'1px solid rgb(139 92 246/0.25)'}}>
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="text-sm font-bold text-white">{selectedProduct.name}</p>
-                    <p className="text-xs text-slate-500">{selectedProduct.code} · {selectedProduct.batch_size} {selectedProduct.batch_unit} Batch</p>
-                    {selectedProduct.group_name&&<p className="text-xs text-slate-500">{selectedProduct.group_name}</p>}
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs text-slate-500">Herstellkosten / kg</p>
-                    <p className="text-2xl font-black text-brand-400">
-                      {productCostPerKg>0 ? fEur(productCostPerKg) : '–'}
-                    </p>
-                  </div>
-                </div>
-                {productDetail?.materials?.length>0&&(
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-600">Rezeptur</p>
-                    {productDetail.materials.map((m:any)=>(
-                      <div key={m.id} className="flex justify-between text-xs">
-                        <span className="text-slate-400">{m.material_name} ({m.quantity} {m.unit})</span>
-                        <span className="text-slate-300 font-mono">
-                          {m.pref_price!=null?fEur(m.pref_price*m.quantity):'-'}
-                        </span>
+      <div className="grid grid-cols-12 gap-5">
+        {/* ── Linke Spalte: Schritte ── */}
+        <div className="col-span-7 space-y-3">
+
+          {/* Schritt 1: Produkt */}
+          <Step n={1} title="Produkt & Variante" icon={<Package size={14}/>}
+            done={!!productId && !!variantId} active={step===0} onClick={()=>setStep(step===0?-1:0)}>
+            <div className="space-y-3 mt-3">
+              <Select label="Produkt auswählen *"
+                value={productId||''} onChange={e=>{setProductId(Number(e.target.value)||null);setVariantId(null)}}>
+                <option value="">– Produkt wählen –</option>
+                {(products2k as any[]).length > 0
+                  ? (products2k as any[]).map((p:any)=><option key={p.id} value={p.id}>{p.name} (2K)</option>)
+                  : (products as any[]).map((p:any)=><option key={p.id} value={p.id}>{p.name}</option>)
+                }
+              </Select>
+
+              {selectedProduct && (
+                <>
+                  {/* Mischungsverhältnis anzeigen */}
+                  <div className="p-3 rounded-xl flex items-center gap-4"
+                    style={{background:'rgb(139 92 246/0.06)',border:'1px solid rgb(139 92 246/0.15)'}}>
+                    <div className="text-center">
+                      <p className="text-[10px] text-slate-500 uppercase">Mischung</p>
+                      <p className="text-lg font-black text-white">
+                        {mixA}:{mixB}
+                      </p>
+                      <p className="text-[10px] text-brand-400">{(mixA/mixB).toFixed(2).replace(/\.?0+$/,'')}:1</p>
+                    </div>
+                    <div className="flex-1 grid grid-cols-2 gap-2">
+                      <div className="p-2 rounded-lg" style={{background:'rgb(139 92 246/0.1)'}}>
+                        <p className="text-[10px] text-slate-500">Komponente A</p>
+                        <p className="text-sm font-bold text-brand-400">{selectedProduct.component_a_name||'–'}</p>
+                        <p className="text-[10px] text-slate-500">{(ratioA*100).toFixed(1)}% des Gemisches</p>
                       </div>
-                    ))}
-                    <div className="flex justify-between text-sm font-bold pt-1 border-t border-white/10">
-                      <span className="text-slate-300">Gesamt ({selectedProduct.batch_size} {selectedProduct.batch_unit})</span>
-                      <span className="text-white">{fEur(productTotalCost)}</span>
+                      <div className="p-2 rounded-lg" style={{background:'rgb(6 182 212/0.1)'}}>
+                        <p className="text-[10px] text-slate-500">Komponente B</p>
+                        <p className="text-sm font-bold text-cyan-400">{selectedProduct.component_b_name||'–'}</p>
+                        <p className="text-[10px] text-slate-500">{(ratioB*100).toFixed(1)}% des Gemisches</p>
+                      </div>
                     </div>
                   </div>
-                )}
-                {(!productDetail?.materials?.length)&&(
-                  <p className="text-xs text-amber-400">⚠ Kein Rezept — bitte manuellen EK-Preis eingeben</p>
-                )}
-                {(!productDetail?.materials?.length)&&(
-                  <div className="flex items-center gap-2">
-                    <Input label="Manueller EK / kg (€)" type="number" step="0.001"
-                      value={manualCostPerKg||''} onChange={e=>setManualCostPerKg(Number(e.target.value))}/>
+
+                  {/* Variante */}
+                  <Select label="Variante (Füllmenge) *"
+                    value={variantId||''} onChange={e=>setVariantId(Number(e.target.value)||null)}>
+                    <option value="">– Variante wählen –</option>
+                    {(selectedProduct.variants||[]).map((v:any)=>(
+                      <option key={v.id} value={v.id}>
+                        {v.name} – {v.total_fill_kg || v.fill_quantity} kg
+                        (A: {((v.total_fill_kg||v.fill_quantity||0)*ratioA).toFixed(3)} kg |
+                         B: {((v.total_fill_kg||v.fill_quantity||0)*ratioB).toFixed(3)} kg)
+                      </option>
+                    ))}
+                    {/* Fallback wenn keine Varianten */}
+                    {(!selectedProduct.variants?.length) && (
+                      <option value={selectedProduct.id}>
+                        Standard – {selectedProduct.batch_size}g
+                      </option>
+                    )}
+                  </Select>
+
+                  {variantId && totalKg > 0 && (
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      {[
+                        {l:'Gesamtmenge',v:`${totalKg} kg`,c:'text-white'},
+                        {l:'Komponente A',v:`${kgA.toFixed(3)} kg`,c:'text-brand-400'},
+                        {l:'Komponente B',v:`${kgB.toFixed(3)} kg`,c:'text-cyan-400'},
+                      ].map(r=>(
+                        <div key={r.l} className="p-2 rounded-xl text-center"
+                          style={{background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.06)'}}>
+                          <p className="text-slate-500 text-[10px]">{r.l}</p>
+                          <p className={`font-black text-base ${r.c}`}>{r.v}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+              {variantId && <button onClick={()=>setStep(1)} className="w-full py-2 rounded-xl text-xs font-semibold text-white mt-2"
+                style={{background:'rgb(139 92 246/0.2)',border:'1px solid rgb(139 92 246/0.3)'}}>
+                Weiter: Rohstoffpreise <ArrowRight size={12} className="inline ml-1"/>
+              </button>}
+            </div>
+          </Step>
+
+          {/* Schritt 2: Rohstoffpreise */}
+          <Step n={2} title="Rohstoffpreise (Komponenten)" icon={<FlaskConical size={14}/>}
+            done={compAPriceKg > 0} active={step===1} onClick={()=>setStep(step===1?-1:1)}>
+            <div className="space-y-3 mt-3">
+              <p className="text-xs text-slate-500">
+                Preis/kg für jede Komponente eingeben oder aus Rezeptur übernehmen.
+              </p>
+
+              {/* Komponente A */}
+              <div className="p-3 rounded-xl space-y-2"
+                style={{background:'rgb(139 92 246/0.06)',border:'1px solid rgb(139 92 246/0.2)'}}>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-brand-400">
+                    Komponente A — {selectedProduct?.component_a_name||'unbekannt'}
+                  </p>
+                  <span className="text-[10px] text-slate-500">{kgA.toFixed(3)} kg benötigt</span>
+                </div>
+                <div className="flex gap-2 items-end">
+                  <div className="flex-1">
+                    <label className="text-[10px] text-slate-500 block mb-1">Preis / kg (€ netto)</label>
+                    <input type="number" step="0.001" value={compAPriceKg||''}
+                      onChange={e=>setCompAPriceKg(Number(e.target.value))}
+                      className="w-full px-3 py-2 rounded-xl text-sm text-white font-mono bg-white/5 border border-white/10 focus:border-brand-500/50 outline-none"
+                      placeholder="0,0000"/>
                   </div>
-                )}
-              </div>
-            )}
-            <button onClick={() => setActiveStep(1)} disabled={!selectedProduct}
-              className={`w-full py-2 rounded-xl text-xs font-semibold text-white transition-colors ${selectedProduct?'hover:bg-brand-500/30':'opacity-40 cursor-not-allowed'}`}
-              style={{background:'rgb(139 92 246/0.2)',border:'1px solid rgb(139 92 246/0.3)'}}>
-              Weiter zu Variante & Verpackung →
-            </button>
-          </div>
-        </Step>
-
-        {/* ── SCHRITT 2: Rezeptur ── */}
-        <Step n={2} title="Rezeptur / Zusammensetzung" icon={<FlaskConical size={14}/>}
-          active={activeStep===1} done={recipePositions.length>0 && activeStep>1}
-          onClick={() => setActiveStep(activeStep===1?-1:1)}>
-          <div className="mt-4 space-y-3">
-            <div className="flex items-center gap-2 mb-2">
-              <AlertCircle size={12} className={pctOk?'text-emerald-400':'text-amber-400'}/>
-              <span className={`text-xs ${pctOk?'text-emerald-400':'text-amber-400'}`}>
-                {recipePositions.length === 0
-                  ? 'Füge Rohstoffe hinzu. Die Summe muss 100% ergeben.'
-                  : pctOk
-                    ? `✓ Summe: ${f2(pctSum)}% = 100% ✓`
-                    : `Summe: ${f2(pctSum)}% – Abweichung von 100%!`}
-              </span>
-            </div>
-
-            {/* Positionen */}
-            {recipePositions.length > 0 && (
-              <table className="w-full text-xs">
-                <thead><tr style={{borderBottom:'1px solid rgb(255 255 255/0.05)'}}>
-                  <th className="table-th text-left py-1.5">Rohstoff</th>
-                  <th className="table-th text-right">Menge (kg)</th>
-                  <th className="table-th text-right">Anteil %</th>
-                  <th className="table-th text-right">Preis/kg</th>
-                  <th className="table-th text-right">Kosten</th>
-                  <th className="table-th w-6"/>
-                </tr></thead>
-                <tbody>
-                  {recipePercentages.map(p => (
-                    <tr key={p.id} style={{borderBottom:'1px solid rgb(255 255 255/0.03)'}}>
-                      <td className="py-2 text-slate-300">{p.name}</td>
-                      <td className="text-right font-mono text-slate-300">{p.quantity_kg}</td>
-                      <td className="text-right">
-                        <span className={`font-mono ${Math.abs(p.pct - 100/recipePositions.length) < 5?'text-slate-400':'text-slate-400'}`}>
-                          {f2(p.pct)}%
-                        </span>
-                      </td>
-                      <td className="text-right font-mono text-slate-400">{fEur(p.price_per_kg)}</td>
-                      <td className="text-right font-mono font-semibold text-slate-200">{fEur(p.quantity_kg * p.price_per_kg)}</td>
-                      <td className="text-center">
-                        <button onClick={() => setRecipePositions(ps => ps.filter(x=>x.id!==p.id))}
-                          className="text-red-400 hover:text-red-300"><Trash2 size={11}/></button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot><tr style={{borderTop:'1px solid rgb(255 255 255/0.08)'}}>
-                  <td className="py-2 font-bold text-slate-200 text-xs">Gesamt</td>
-                  <td className="text-right font-mono font-bold text-white">{f2(totalRecipeKg)} kg</td>
-                  <td className="text-right font-mono font-bold text-white">{f2(pctSum)}%</td>
-                  <td/>
-                  <td className="text-right font-mono font-bold text-white">{fEur(totalRecipeCost)}</td>
-                  <td/>
-                </tr></tfoot>
-              </table>
-            )}
-
-            {/* Neue Position */}
-            <div className="grid grid-cols-3 gap-2 p-3 rounded-xl" style={{background:'rgb(139 92 246/0.05)',border:'1px solid rgb(139 92 246/0.15)'}}>
-              <Input label="Rohstoff-Name" value={recipeForm.name}
-                onChange={e => setRecipeForm(f=>({...f,name:e.target.value}))} placeholder="z.B. Benzylalkohol"/>
-              <Input label="Menge (kg)" type="number" step="0.001"
-                value={recipeForm.quantity_kg} onChange={e => setRecipeForm(f=>({...f,quantity_kg:e.target.value as unknown as number}))}
-                hint={totalRecipeKg > 0 ? `= ${f2(Number(recipeForm.quantity_kg)/(totalRecipeKg+Number(recipeForm.quantity_kg||0))*100||0)}%` : ''}/>
-              <Input label="Preis / kg (€)" type="number" step="0.0001"
-                value={recipeForm.price_per_kg}
-                onChange={e => setRecipeForm(f=>({...f,price_per_kg:e.target.value as unknown as number}))}
-                hint={matResult.total_net_per_unit > 0 ? `Rohstoff-DB: ${fEur(matResult.total_net_per_unit)}` : ''}/>
-            </div>
-            <button onClick={() => {
-              if (!recipeForm.name || !recipeForm.quantity_kg) return
-              setRecipePositions(ps => [...ps, { id:Date.now(), name:recipeForm.name, quantity_kg:Number(recipeForm.quantity_kg), price_per_kg:Number(recipeForm.price_per_kg) }])
-              setRecipeForm({name:'',quantity_kg:'',price_per_kg:''})
-            }} className="flex items-center gap-1.5 text-xs text-brand-400 hover:text-brand-300">
-              <Plus size={12}/> Position hinzufügen
-            </button>
-
-            {totalRecipeKg > 0 && (
-              <div className="p-3 rounded-xl flex justify-between items-center"
-                style={{background:'rgb(16 185 129/0.08)',border:'1px solid rgb(16 185 129/0.2)'}}>
-                <div>
-                  <p className="text-xs text-slate-400">Rohstoffkosten pro kg</p>
-                  <p className="text-xl font-black text-white">{fEur(costPerKgRecipe)}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs text-slate-500">{f2(totalRecipeKg)} kg Batch</p>
-                  <p className="text-sm font-bold text-emerald-400">{fEur(totalRecipeCost)} gesamt</p>
+                  <div className="text-right pb-2">
+                    <p className="text-[10px] text-slate-500">Kosten Komp. A</p>
+                    <p className="text-sm font-bold text-brand-400">{fEur(costA)}</p>
+                  </div>
                 </div>
               </div>
-            )}
 
-            <button onClick={() => setActiveStep(2)}
-              className="w-full py-2 rounded-xl text-xs font-semibold text-white"
-              style={{background:'rgb(139 92 246/0.2)',border:'1px solid rgb(139 92 246/0.3)'}}>
-              Weiter zu 2K-Mischung / Verpackung →
-            </button>
-          </div>
-        </Step>
-
-        {/* ── SCHRITT 3: 2K Mischung ── */}
-        <Step n={3} title="2K-Produkt Mischungsverhältnis" icon={<Calculator size={14}/>}
-          active={activeStep===2} done={activeStep>2}
-          onClick={() => setActiveStep(activeStep===2?-1:2)}>
-          <div className="mt-4 space-y-4">
-            <div className="flex items-center justify-between p-3 rounded-xl"
-              style={{background:use2k?'rgb(139 92 246/0.08)':'rgb(255 255 255/0.02)',border:'1px solid rgb(255 255 255/0.06)'}}>
-              <div>
-                <p className="text-sm font-semibold text-slate-200">2K-Produkt (Zwei-Komponenten)</p>
-                <p className="text-xs text-slate-500">z.B. EpoxyPlast 100P: Komponente (A) + Komponente (B)</p>
+              {/* Komponente B */}
+              <div className="p-3 rounded-xl space-y-2"
+                style={{background:'rgb(6 182 212/0.06)',border:'1px solid rgb(6 182 212/0.2)'}}>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-cyan-400">
+                    Komponente B — {selectedProduct?.component_b_name||'unbekannt'}
+                  </p>
+                  <span className="text-[10px] text-slate-500">{kgB.toFixed(3)} kg benötigt</span>
+                </div>
+                <div className="flex gap-2 items-end">
+                  <div className="flex-1">
+                    <label className="text-[10px] text-slate-500 block mb-1">Preis / kg (€ netto)</label>
+                    <input type="number" step="0.001" value={compBPriceKg||''}
+                      onChange={e=>setCompBPriceKg(Number(e.target.value))}
+                      className="w-full px-3 py-2 rounded-xl text-sm text-white font-mono bg-white/5 border border-white/10 focus:border-brand-500/50 outline-none"
+                      placeholder="0,0000"/>
+                  </div>
+                  <div className="text-right pb-2">
+                    <p className="text-[10px] text-slate-500">Kosten Komp. B</p>
+                    <p className="text-sm font-bold text-cyan-400">{fEur(costB)}</p>
+                  </div>
+                </div>
               </div>
-              <button onClick={() => setUse2k(v=>!v)}
-                className={`relative w-10 h-5 rounded-full transition-colors ${use2k?'bg-brand-500':'bg-slate-700'}`}>
-                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${use2k?'translate-x-5':'translate-x-0.5'}`}/>
+
+              <div className="flex justify-between items-center p-2 rounded-xl"
+                style={{background:'rgba(255,255,255,0.03)'}}>
+                <span className="text-xs text-slate-400">Füllkosten gesamt</span>
+                <span className="text-sm font-bold text-white font-mono">{fEur(costFilling)}</span>
+              </div>
+
+              <button onClick={()=>setStep(2)} className="w-full py-2 rounded-xl text-xs font-semibold text-white"
+                style={{background:'rgb(139 92 246/0.2)',border:'1px solid rgb(139 92 246/0.3)'}}>
+                Weiter: Gebinde & Verpackung <ArrowRight size={12} className="inline ml-1"/>
               </button>
             </div>
+          </Step>
 
-            {use2k && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="p-3 rounded-xl" style={{background:'rgb(139 92 246/0.08)',border:'1px solid rgb(139 92 246/0.2)'}}>
-                    <p className="text-xs font-bold text-brand-400 mb-2">Komponente (A) – Epoxidharz</p>
-                    <Input label="Preis / kg (€)" type="number" step="0.001"
-                      value={twoK.comp_a_cost_per_kg||''}
-                      onChange={e=>setTwoK(k=>({...k,comp_a_cost_per_kg:Number(e.target.value)}))}
-                      hint={costPerKgRecipe>0?`Aus Rezept: ${fEur(costPerKgRecipe)}`:''}/>
-                    {costPerKgRecipe > 0 && (
-                      <button onClick={()=>setTwoK(k=>({...k,comp_a_cost_per_kg:costPerKgRecipe}))}
-                        className="mt-1 text-xs text-brand-400 hover:text-brand-300">
-                        ← Aus Rezept übernehmen
-                      </button>
-                    )}
-                  </div>
-                  <div className="p-3 rounded-xl" style={{background:'rgb(6 182 212/0.08)',border:'1px solid rgb(6 182 212/0.2)'}}>
-                    <p className="text-xs font-bold text-cyan-400 mb-2">Komponente (B) – Härter</p>
-                    <Input label="Preis / kg (€)" type="number" step="0.001"
-                      value={twoK.comp_b_cost_per_kg||''}
-                      onChange={e=>setTwoK(k=>({...k,comp_b_cost_per_kg:Number(e.target.value)}))}/>
-                  </div>
+          {/* Schritt 3: Gebinde */}
+          <Step n={3} title="Gebinde · Deckel · Etikett · Karton" icon={<Layers size={14}/>}
+            done={!!packAId} active={step===2} onClick={()=>setStep(step===2?-1:2)}>
+            <div className="space-y-4 mt-3">
+
+              {/* Flasche A */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-[10px] font-bold text-brand-400 uppercase tracking-wider mb-1.5">Gebinde Komp. A</p>
+                  <select value={packAId||''} onChange={e=>setPackAId(Number(e.target.value)||null)}
+                    className="w-full px-3 py-2 rounded-xl text-xs text-white bg-white/5 border border-white/10 outline-none">
+                    <option value="">– kein –</option>
+                    {(packaging as any[]).map((p:any)=>(
+                      <option key={p.id} value={p.id}>{p.name} – {fEur(p.price_per_unit||0)}</option>
+                    ))}
+                  </select>
+                  {packA && <p className="text-[10px] text-slate-500 mt-1">Tara: {packA.tare_weight_g||packA.weight_g||0} g · Art.-Nr.: {packA.article_number||'–'}</p>}
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <Input label="Anteil A" type="number" step="1"
-                    value={twoK.ratio_a} onChange={e=>setTwoK(k=>({...k,ratio_a:Number(e.target.value)}))}
-                    hint="z.B. 100"/>
-                  <Input label="Anteil B" type="number" step="1"
-                    value={twoK.ratio_b} onChange={e=>setTwoK(k=>({...k,ratio_b:Number(e.target.value)}))}
-                    hint="z.B. 50"/>
+                <div>
+                  <p className="text-[10px] font-bold text-brand-400 uppercase tracking-wider mb-1.5">Deckel Komp. A</p>
+                  <select value={lidAId||''} onChange={e=>setLidAId(Number(e.target.value)||null)}
+                    className="w-full px-3 py-2 rounded-xl text-xs text-white bg-white/5 border border-white/10 outline-none">
+                    <option value="">– kein –</option>
+                    {(lids as any[]).map((l:any)=>(
+                      <option key={l.id} value={l.id}>{l.name} – {fEur(l.price_per_unit||0)}</option>
+                    ))}
+                  </select>
+                  {lidA && <p className="text-[10px] text-slate-500 mt-1">Gewicht: {lidA.weight_g||0} g · Art.-Nr.: {lidA.article_number||'–'}</p>}
                 </div>
-                {twoK.comp_a_cost_per_kg > 0 && (
-                  <div className="p-3 rounded-xl" style={{background:'rgb(16 185 129/0.08)',border:'1px solid rgb(16 185 129/0.2)'}}>
-                    <p className="text-xs text-slate-400 mb-1">Mischungsverhältnis: <strong className="text-white">{twoKResult.ratio_label}</strong></p>
-                    <div className="flex gap-6 text-xs">
-                      <span className="text-slate-500">A-Anteil: <strong className="text-brand-400">{fPct(twoKResult.share_a*100)}</strong></span>
-                      <span className="text-slate-500">B-Anteil: <strong className="text-cyan-400">{fPct(twoKResult.share_b*100)}</strong></span>
+              </div>
+
+              {/* Flasche B */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider mb-1.5">Gebinde Komp. B</p>
+                  <select value={packBId||''} onChange={e=>setPackBId(Number(e.target.value)||null)}
+                    className="w-full px-3 py-2 rounded-xl text-xs text-white bg-white/5 border border-white/10 outline-none">
+                    <option value="">– kein –</option>
+                    {(packaging as any[]).map((p:any)=>(
+                      <option key={p.id} value={p.id}>{p.name} – {fEur(p.price_per_unit||0)}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider mb-1.5">Deckel Komp. B</p>
+                  <select value={lidBId||''} onChange={e=>setLidBId(Number(e.target.value)||null)}
+                    className="w-full px-3 py-2 rounded-xl text-xs text-white bg-white/5 border border-white/10 outline-none">
+                    <option value="">– kein –</option>
+                    {(lids as any[]).map((l:any)=>(
+                      <option key={l.id} value={l.id}>{l.name} – {fEur(l.price_per_unit||0)}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Etikett + Karton */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Etikett</p>
+                  <select value={labelAId||''} onChange={e=>setLabelAId(Number(e.target.value)||null)}
+                    className="w-full px-3 py-2 rounded-xl text-xs text-white bg-white/5 border border-white/10 outline-none">
+                    <option value="">– kein –</option>
+                    {(labels as any[]).map((l:any)=>(
+                      <option key={l.id} value={l.id}>{l.name} – {fEur(l.price_per_unit||l.price_per_1000/1000||0)}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Karton</p>
+                  <select value={cartonId||''} onChange={e=>setCartonId(Number(e.target.value)||null)}
+                    className="w-full px-3 py-2 rounded-xl text-xs text-white bg-white/5 border border-white/10 outline-none">
+                    <option value="">– kein –</option>
+                    {(cartons as any[]).map((c:any)=>(
+                      <option key={c.id} value={c.id}>{c.name} – {fEur(c.price_per_unit||0)}</option>
+                    ))}
+                  </select>
+                  {cartonId && (
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <span className="text-[10px] text-slate-500">Sets/Karton:</span>
+                      <input type="number" min="1" value={unitsPerCarton}
+                        onChange={e=>setUnitsPerCarton(Math.max(1,Number(e.target.value)))}
+                        className="w-16 px-2 py-1 rounded-lg text-xs text-white bg-white/5 border border-white/10 outline-none"/>
+                      <span className="text-[10px] text-slate-500">= {fEur(costCarton)}/Set</span>
                     </div>
-                    <div className="flex justify-between mt-2">
-                      <span className="text-sm text-slate-400">Preis / kg Set</span>
-                      <span className="text-lg font-black text-white">{fEur(twoKResult.cost_per_kg_set)}</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Verpackungskosten Zusammenfassung */}
+              <div className="p-3 rounded-xl space-y-1"
+                style={{background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.06)'}}>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Verpackungskosten</p>
+                {costPackA>0&&<div className="flex justify-between text-xs"><span className="text-slate-500">Flasche A</span><span className="text-slate-300 font-mono">{fEur(costPackA)}</span></div>}
+                {costLidA>0&&<div className="flex justify-between text-xs"><span className="text-slate-500">Deckel A</span><span className="text-slate-300 font-mono">{fEur(costLidA)}</span></div>}
+                {costPackB>0&&<div className="flex justify-between text-xs"><span className="text-slate-500">Flasche B</span><span className="text-slate-300 font-mono">{fEur(costPackB)}</span></div>}
+                {costLidB>0&&<div className="flex justify-between text-xs"><span className="text-slate-500">Deckel B</span><span className="text-slate-300 font-mono">{fEur(costLidB)}</span></div>}
+                {costLabel>0&&<div className="flex justify-between text-xs"><span className="text-slate-500">Etikett</span><span className="text-slate-300 font-mono">{fEur(costLabel)}</span></div>}
+                {costCarton>0&&<div className="flex justify-between text-xs"><span className="text-slate-500">Karton (anteilig)</span><span className="text-slate-300 font-mono">{fEur(costCarton)}</span></div>}
+                <div className="flex justify-between text-xs font-bold border-t border-white/8 pt-1 mt-1">
+                  <span className="text-slate-300">Gesamt Verpackung</span>
+                  <span className="text-white font-mono">{fEur(costPackaging)}</span>
+                </div>
+              </div>
+
+              <div className="p-2 rounded-xl flex items-center justify-between"
+                style={{background:'rgba(255,255,255,0.02)'}}>
+                <span className="text-xs text-slate-400">Bruttogewicht (geschätzt)</span>
+                <span className="text-sm font-bold text-slate-200 font-mono">{bruttoKg.toFixed(3)} kg</span>
+              </div>
+
+              <button onClick={()=>setStep(3)} className="w-full py-2 rounded-xl text-xs font-semibold text-white"
+                style={{background:'rgb(139 92 246/0.2)',border:'1px solid rgb(139 92 246/0.3)'}}>
+                Weiter: Versandkosten <ArrowRight size={12} className="inline ml-1"/>
+              </button>
+            </div>
+          </Step>
+
+          {/* Schritt 4: Versand */}
+          <Step n={4} title="Versandkosten" icon={<Truck size={14}/>}
+            done={shippingCost > 0} active={step===3} onClick={()=>setStep(step===3?-1:3)}>
+            <div className="space-y-3 mt-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1">Zielland</label>
+                  <select value={country} onChange={e=>setCountry(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl text-xs text-white bg-white/5 border border-white/10 outline-none">
+                    {COUNTRIES.map(c=><option key={c.code} value={c.code}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1">Versandgewicht (kg)</label>
+                  <input type="number" step="0.01" value={weightKg||bruttoKg.toFixed(3)}
+                    onChange={e=>setWeightKg(Number(e.target.value))}
+                    className="w-full px-3 py-2 rounded-xl text-xs text-white font-mono bg-white/5 border border-white/10 outline-none"/>
+                  <p className="text-[10px] text-slate-600 mt-0.5">Brutto: ~{bruttoKg.toFixed(3)} kg</p>
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] text-slate-500 block mb-1">Versandkosten (€)</label>
+                <input type="number" step="0.01" value={shippingCost||''}
+                  onChange={e=>setShippingCost(Number(e.target.value))}
+                  className="w-full px-3 py-2 rounded-xl text-sm text-white font-mono bg-white/5 border border-white/10 outline-none"
+                  placeholder="0,00"/>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  💡 Versandprofile mit Staffeln werden in Phase 2 vollständig implementiert
+                </p>
+              </div>
+              <button onClick={()=>setStep(4)} className="w-full py-2 rounded-xl text-xs font-semibold text-white"
+                style={{background:'rgb(139 92 246/0.2)',border:'1px solid rgb(139 92 246/0.3)'}}>
+                Weiter: Plattform & Marge <ArrowRight size={12} className="inline ml-1"/>
+              </button>
+            </div>
+          </Step>
+
+          {/* Schritt 5: Plattform & Marge */}
+          <Step n={5} title="Plattform · Zahlung · Zielmarge" icon={<TrendingUp size={14}/>}
+            done={false} active={step===4} onClick={()=>setStep(step===4?-1:4)}>
+            <div className="space-y-3 mt-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1">Plattformgebühr %</label>
+                  <input type="number" step="0.1" value={platformFeeP||''} onChange={e=>setPlatformFeeP(Number(e.target.value))}
+                    className="w-full px-3 py-2 rounded-xl text-sm text-white font-mono bg-white/5 border border-white/10 outline-none" placeholder="0"/>
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1">Plattformgebühr fix (€)</label>
+                  <input type="number" step="0.01" value={platformFeeF||''} onChange={e=>setPlatformFeeF(Number(e.target.value))}
+                    className="w-full px-3 py-2 rounded-xl text-sm text-white font-mono bg-white/5 border border-white/10 outline-none" placeholder="0,00"/>
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1">Zahlungsgebühr %</label>
+                  <input type="number" step="0.1" value={paymentFeeP||''} onChange={e=>setPaymentFeeP(Number(e.target.value))}
+                    className="w-full px-3 py-2 rounded-xl text-sm text-white font-mono bg-white/5 border border-white/10 outline-none" placeholder="0"/>
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1">MwSt. %</label>
+                  <select value={vatRate} onChange={e=>setVatRate(Number(e.target.value))}
+                    className="w-full px-3 py-2 rounded-xl text-xs text-white bg-white/5 border border-white/10 outline-none">
+                    <option value={19}>19% (DE Standard)</option>
+                    <option value={7}>7% (DE ermäßigt)</option>
+                    <option value={0}>0% (Export/B2B)</option>
+                    <option value={20}>20% (AT)</option>
+                    <option value={23}>23% (PL)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl" style={{background:'rgb(139 92 246/0.06)',border:'1px solid rgb(139 92 246/0.2)'}}>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-bold text-brand-400">Zielmarge</p>
+                  <span className="text-lg font-black text-white">{targetMargin}%</span>
+                </div>
+                <input type="range" min={0} max={80} step={1} value={targetMargin}
+                  onChange={e=>setTargetMargin(Number(e.target.value))}
+                  className="w-full accent-purple-500"/>
+                <div className="flex justify-between text-[10px] text-slate-600 mt-1">
+                  <span>0%</span><span>20%</span><span>40%</span><span>60%</span><span>80%</span>
+                </div>
+                {hasData && <p className="text-xs text-brand-400 mt-2 text-center">
+                  Vorgeschlagener Netto-VK: <strong className="text-white">{fEur(netSuggested)}</strong>
+                </p>}
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] text-slate-500">Eigener VK-Preis (netto)</label>
+                  <button onClick={()=>setUseCustomPrice(v=>!v)}
+                    className={`text-[10px] px-2 py-0.5 rounded-full transition-all ${useCustomPrice?'bg-brand-500/20 text-brand-400':'bg-white/5 text-slate-500'}`}>
+                    {useCustomPrice?'✓ Manuell':'Automatisch'}
+                  </button>
+                </div>
+                <input type="number" step="0.01" value={customPrice||''} onChange={e=>setCustomPrice(Number(e.target.value))}
+                  disabled={!useCustomPrice}
+                  className="w-full px-3 py-2 rounded-xl text-sm text-white font-mono bg-white/5 border border-white/10 outline-none disabled:opacity-40"
+                  placeholder={fEur(netSuggested)}/>
+              </div>
+            </div>
+          </Step>
+        </div>
+
+        {/* ── Rechte Spalte: Ergebnis ── */}
+        <div className="col-span-5 space-y-4">
+          <div className="glass-card p-5 sticky top-4">
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">
+              Kalkulationsergebnis
+            </p>
+
+            {!hasData ? (
+              <div className="text-center py-8">
+                <Calculator size={32} className="text-slate-700 mx-auto mb-3"/>
+                <p className="text-slate-500 text-sm">Fülle die Schritte aus</p>
+                <p className="text-slate-600 text-xs mt-1">Produkt → Preise → Gebinde → Versand</p>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <CostRow label="Komponente A" value={costA} sub={`${kgA.toFixed(3)} kg × ${f4(compAPriceKg)} €`} color="#a78bfa"/>
+                <CostRow label="Komponente B" value={costB} sub={`${kgB.toFixed(3)} kg × ${f4(compBPriceKg)} €`} color="#22d3ee"/>
+                <CostRow label="Füllkosten" value={costFilling} bold/>
+
+                {costPackaging > 0 && <>
+                  <div className="pt-2"/>
+                  {costPackA>0&&<CostRow label="Flasche A"      value={costPackA}/>}
+                  {costLidA>0&&<CostRow  label="Deckel A"       value={costLidA}/>}
+                  {costPackB>0&&<CostRow label="Flasche B"      value={costPackB}/>}
+                  {costLidB>0&&<CostRow  label="Deckel B"       value={costLidB}/>}
+                  {costLabel>0&&<CostRow label="Etikett"        value={costLabel}/>}
+                  {costCarton>0&&<CostRow label="Karton (ant.)" value={costCarton}/>}
+                  <CostRow label="Verpackung gesamt" value={costPackaging} bold/>
+                </>}
+
+                <div className="my-2 border-t border-white/8"/>
+                <CostRow label="🏭 Selbstkosten" value={costSelf} bold color="#f59e0b"/>
+
+                {shippingCost > 0 && <CostRow label="📦 Versand" value={shippingCost} color="#10b981"/>}
+                <CostRow label="Basis (SK + Versand)" value={baseCost} bold/>
+
+                <div className="my-2 border-t border-white/8"/>
+                <CostRow label="Netto VK" value={netPrice} bold color="#8b5cf6"/>
+                <CostRow label={`MwSt. ${vatRate}%`} value={grossPrice - netPrice}/>
+                <CostRow label="Brutto VK" value={grossPrice} bold color="#a78bfa"/>
+
+                {(platformFee > 0 || paymentFee > 0) && <>
+                  <div className="my-2 border-t border-white/8"/>
+                  {platformFee>0&&<CostRow label="Plattformgebühr" value={-platformFee} color="#ef4444"/>}
+                  {paymentFee>0&&<CostRow  label="Zahlungsgebühr"  value={-paymentFee}  color="#ef4444"/>}
+                  <CostRow label="Netto nach Gebühren" value={netAfterFees} bold/>
+                </>}
+
+                <div className="mt-4 p-3 rounded-xl" style={{
+                  background: marginPct >= 20 ? 'rgb(16 185 129/0.1)' : marginPct >= 10 ? 'rgb(245 158 11/0.1)' : 'rgb(239 68 68/0.1)',
+                  border: `1px solid ${marginPct >= 20 ? 'rgb(16 185 129/0.3)' : marginPct >= 10 ? 'rgb(245 158 11/0.3)' : 'rgb(239 68 68/0.3)'}`,
+                }}>
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wider">Marge</p>
+                      <p className="text-3xl font-black" style={{color: marginPct>=20?'#10b981':marginPct>=10?'#f59e0b':'#ef4444'}}>
+                        {fPct(marginPct)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] text-slate-500">Marge absolut</p>
+                      <p className="text-lg font-bold text-white">{fEur(marginAbs)}</p>
+                      <p className="text-[10px] text-slate-500">DB: {fEur(db)}</p>
                     </div>
                   </div>
-                )}
+                  {marginPct < 10 && (
+                    <div className="flex items-center gap-1.5 mt-2 text-xs text-red-400">
+                      <AlertTriangle size={11}/>Marge zu niedrig — Preis prüfen
+                    </div>
+                  )}
+                </div>
+
+                {/* Bruttogewicht */}
+                <div className="mt-2 p-2 rounded-xl flex items-center justify-between text-xs"
+                  style={{background:'rgba(255,255,255,0.02)'}}>
+                  <span className="text-slate-500">Bruttogewicht</span>
+                  <span className="text-slate-300 font-mono">{bruttoKg.toFixed(3)} kg</span>
+                </div>
               </div>
             )}
-            <button onClick={() => setActiveStep(3)}
-              className="w-full py-2 rounded-xl text-xs font-semibold text-white"
-              style={{background:'rgb(139 92 246/0.2)',border:'1px solid rgb(139 92 246/0.3)'}}>
-              Weiter zu Verpackung →
-            </button>
           </div>
-        </Step>
-
-        {/* ── SCHRITT 4: Verpackung ── */}
-        <Step n={4} title="Verpackung, Etiketten & Kartonagen" icon={<Package size={14}/>}
-          active={activeStep===3} done={activeStep>3}
-          onClick={() => setActiveStep(activeStep===3?-1:3)}>
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <Input label="Füllmenge (kg)" type="number" step="0.001"
-              value={pack.fill_kg} onChange={e=>pk('fill_kg',Number(e.target.value))} hint="z.B. 1.5 kg"/>
-            <Input label="Overhead %" type="number" step="0.1"
-              value={pack.overhead_pct} onChange={e=>pk('overhead_pct',Number(e.target.value))} hint="Gemeinkosten"/>
-            <Input label="Behältnis (€)" type="number" step="0.0001"
-              value={pack.pkg_cost||''} onChange={e=>pk('pkg_cost',Number(e.target.value))} hint="Flasche / Kanister"/>
-            <Input label="Deckel (€)" type="number" step="0.0001"
-              value={pack.lid_cost||''} onChange={e=>pk('lid_cost',Number(e.target.value))}/>
-            <Input label="Etikett (€/Stk)" type="number" step="0.0001"
-              value={pack.label_cost||''} onChange={e=>pk('label_cost',Number(e.target.value))} hint="Preis/1000 ÷ 1000"/>
-            <Input label="Karton-Anteil (€)" type="number" step="0.0001"
-              value={pack.carton_cost||''} onChange={e=>pk('carton_cost',Number(e.target.value))} hint="Kartonpreis ÷ Stk/Karton"/>
-            <div className="col-span-2 flex justify-between text-xs p-2 rounded-lg"
-              style={{background:'rgb(255 255 255/0.03)'}}>
-              <span className="text-slate-500">Verpackungskosten gesamt</span>
-              <span className="text-white font-mono font-semibold">{fEur(pack.pkg_cost+pack.lid_cost+pack.label_cost+pack.carton_cost)}</span>
-            </div>
-          </div>
-          <button onClick={() => setActiveStep(4)}
-            className="w-full mt-3 py-2 rounded-xl text-xs font-semibold text-white"
-            style={{background:'rgb(139 92 246/0.2)',border:'1px solid rgb(139 92 246/0.3)'}}>
-            Weiter zu Verkauf →
-          </button>
-        </Step>
-
-        {/* ── SCHRITT 5: Verkauf ── */}
-        <Step n={5} title="Verkaufspreis & Gebühren" icon={<Store size={14}/>}
-          active={activeStep===4} done={!!result}
-          onClick={() => setActiveStep(activeStep===4?-1:4)}>
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <Input label="VK netto (€) *" type="number" step="0.01"
-              value={sell.price_net||''} onChange={e=>sk('price_net',Number(e.target.value))}/>
-            <Select label="MwSt." value={sell.vat} onChange={e=>sk('vat',Number(e.target.value))}>
-              {[0,7,19].map(r=><option key={r} value={r}>{r}%</option>)}
-            </Select>
-            <Input label="Plattform-Gebühr %" type="number" step="0.01"
-              value={sell.platform_pct||''} onChange={e=>sk('platform_pct',Number(e.target.value))} hint="z.B. Amazon 8.0%"/>
-            <Input label="Plattform fix (€)" type="number" step="0.01"
-              value={sell.platform_fix||''} onChange={e=>sk('platform_fix',Number(e.target.value))}/>
-            <Input label="Zahlung % (z.B. PayPal)" type="number" step="0.01"
-              value={sell.payment_pct||''} onChange={e=>sk('payment_pct',Number(e.target.value))} hint="z.B. 1.49%"/>
-            <Input label="Zahlung fix (€)" type="number" step="0.01"
-              value={sell.payment_fix||''} onChange={e=>sk('payment_fix',Number(e.target.value))} hint="z.B. PayPal 0.35€"/>
-            <Input label="Rabatt %" type="number" step="0.1"
-              value={sell.discount_pct||''} onChange={e=>sk('discount_pct',Number(e.target.value))}/>
-          </div>
-        </Step>
-
-        {/* ── ERGEBNIS ── */}
-        {result && (
-          <div className="glass-card p-5" style={{border:`1px solid ${result.is_profitable?'rgb(16 185 129/0.3)':'rgb(239 68 68/0.3)'}`,boxShadow:`0 0 20px ${result.is_profitable?'rgb(16 185 129/0.1)':'rgb(239 68 68/0.1)'}`}}>
-            <div className="flex items-center gap-2 mb-4">
-              <TrendingUp size={16} className={result.is_profitable?'text-emerald-400':'text-red-400'}/>
-              <h3 className="text-sm font-bold text-white">Kalkulationsergebnis</h3>
-              {!result.is_profitable && <span className="badge-red text-xs flex items-center gap-1"><AlertCircle size={10}/>Negative Marge!</span>}
-            </div>
-
-            <div className="grid grid-cols-2 gap-x-8 gap-y-0.5">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-2">Kosten</p>
-                <ResultRow label="Rohstoffkosten" value={fEur(result.material_cost)} indent={1}/>
-                <ResultRow label="Verpackung" value={fEur(result.packaging_total)} indent={1}/>
-                <ResultRow label="Gemeinkosten" value={fEur(result.overhead_cost)} indent={1}/>
-                <ResultRow label="Selbstkosten (COGS)" value={fEur(result.cogs)} bold color="text-red-400"/>
-              </div>
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-2">Erlös</p>
-                <ResultRow label="VK netto" value={fEur(result.selling_net)}/>
-                {showGross && <ResultRow label="VK brutto" value={fEur(result.selling_gross)} color="text-emerald-400"/>}
-                {result.discount_amount > 0 && <ResultRow label="Rabatt" value={`-${fEur(result.discount_amount)}`} color="text-amber-400" indent={1}/>}
-                {result.platform_fee > 0 && <ResultRow label="Plattformgebühr" value={`-${fEur(result.platform_fee)}`} indent={1}/>}
-                {result.payment_fee > 0 && <ResultRow label="Zahlungsgebühr" value={`-${fEur(result.payment_fee)}`} indent={1}/>}
-                <ResultRow label="Netto-Erlös" value={fEur(result.net_after_fees)} bold/>
-              </div>
-            </div>
-
-            <div className="mt-4 pt-4 border-t border-white/10 grid grid-cols-3 gap-4">
-              <div className="text-center p-3 rounded-xl" style={{background:'rgb(255 255 255/0.04)'}}>
-                <p className="text-xs text-slate-500 mb-1">Gewinn / Stück</p>
-                <p className={`text-xl font-black ${result.is_profitable?'text-emerald-400':'text-red-400'}`}>{fEur(result.gross_margin)}</p>
-              </div>
-              <div className="text-center p-3 rounded-xl" style={{background:'rgb(255 255 255/0.04)'}}>
-                <p className="text-xs text-slate-500 mb-1">Marge</p>
-                <p className={`text-xl font-black ${result.gross_margin_pct>=30?'text-emerald-400':result.gross_margin_pct>=10?'text-amber-400':'text-red-400'}`}>{fPct(result.gross_margin_pct)}</p>
-              </div>
-              <div className="text-center p-3 rounded-xl" style={{background:'rgb(255 255 255/0.04)'}}>
-                <p className="text-xs text-slate-500 mb-1">Deckungsbeitrag</p>
-                <p className="text-xl font-black text-brand-400">{fEur(result.contribution)}</p>
-              </div>
-            </div>
-          </div>
-        )}
+        </div>
       </div>
     </div>
   )

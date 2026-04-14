@@ -27,8 +27,20 @@ const qc = new QueryClient({
 
 export default function App() {
   const { active } = useThemeStore()
-  // Apply stored theme safely
-  try { if (typeof document !== 'undefined') applyThemeToDom(active) } catch {}
+  // Apply stored theme – force dark background always
+  try {
+    if (typeof document !== 'undefined') {
+      // Safety: never allow a non-dark background
+      const safeBg = (active.bgPrimary||'').match(/^#[0-9a-f]/i) &&
+        !active.bgPrimary.match(/^#[2-9a-f][^0]/i)
+        ? active.bgPrimary : '#0c0e1a'
+      const safeTheme = { ...active, bgPrimary: safeBg }
+      applyThemeToDom(safeTheme)
+      // Also directly set body background
+      document.body.style.background = '#0c0e1a'
+      document.documentElement.style.background = '#0c0e1a'
+    }
+  } catch {}
 
   return (
     <QueryClientProvider client={qc}>

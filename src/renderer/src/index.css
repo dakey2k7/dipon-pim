@@ -1,3 +1,4 @@
+
 /* ── Basis-Hintergrund (überschreibt alles) ─────────────────── */
 html, body, #root {
   background: #0c0e1a !important;
@@ -9,6 +10,18 @@ html, body, #root {
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ── react-grid-layout (scoped, no background override) ─────── */
+
+/* Override grid-layout defaults to not touch background */
+.react-grid-layout { background: transparent !important; }
+.react-grid-item { background: transparent; }
+.react-grid-item.cssTransforms { transition-property: transform; }
+.react-grid-item.resizing { z-index: 1; will-change: width, height; }
+.react-grid-item.react-draggable-dragging { transition: none; z-index: 3; will-change: transform; }
+.react-grid-item > .react-resizable-handle { position: absolute; width: 20px; height: 20px; bottom: 0; right: 0; cursor: se-resize; }
+.react-grid-item > .react-resizable-handle::after { content: ""; position: absolute; right: 3px; bottom: 3px; width: 5px; height: 5px; border-right: 2px solid rgba(139,92,246,0.5); border-bottom: 2px solid rgba(139,92,246,0.5); }
+
 
 @layer base {
   * { box-sizing: border-box; }
@@ -237,3 +250,4 @@ body, #root { font-family: var(--font-family) !important; font-size: var(--font-
   transform: perspective(800px) rotateX(2deg) rotateY(-2deg) scale(1.01);
   box-shadow: var(--glow-shadow);
 }
+

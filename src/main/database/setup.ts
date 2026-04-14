@@ -6,6 +6,7 @@ import { SCHEMA_PHASE2_SQL, SEED_PHASE2_SQL }     from './schema-phase2'
 import { SCHEMA_PRODUCTS_SQL, SEED_PRODUCTS_SQL } from './schema-products'
 import { SCHEMA_DOCS_SQL, SCHEMA_DISCOUNTS_SQL }  from './schema-docs'
 import { SCHEMA_MATERIALS_V2_COLUMNS } from './schema-materials-v2'
+import { SCHEMA_CALC_V2, SCHEMA_CALC_V2_ALTER } from './schema-calc-v2'
 import { seedMaterials }        from './seed-materials'
 import { SCHEMA_AUDIT_SQL }                       from './schema-audit'
 
@@ -27,6 +28,11 @@ export function getDb(): Database.Database {
   _db.exec(SCHEMA_PRODUCTS_SQL)
   _db.exec(SCHEMA_DOCS_SQL)
   _db.exec(SCHEMA_DISCOUNTS_SQL)
+  // Schema calc-v2: Deckel, 2K-Produkte, Versand
+  try { _db.exec(SCHEMA_CALC_V2) } catch (e) { console.error('calc-v2:', e) }
+  for (const sql of SCHEMA_CALC_V2_ALTER) {
+    try { _db.exec(sql) } catch {} // ignore duplicate column
+  }
   // Schema v2: neue Materialfelder (einzeln, damit keine Fehler bei bereits existierenden Spalten)
   for (const sql of SCHEMA_MATERIALS_V2_COLUMNS) {
     try { _db.exec(sql) } catch {} // Ignoriert "duplicate column" Fehler
