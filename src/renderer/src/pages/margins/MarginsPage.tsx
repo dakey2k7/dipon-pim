@@ -63,6 +63,8 @@ function ResultRow({ label, value, color='text-slate-300', bold=false, indent=0,
 // ── Haupt-Kalkulation ─────────────────────────────────────────
 export default function MarginsPage() {
   const [activeStep, setActiveStep] = useState(0)
+  const [selectedProductId, setSelectedProductId] = useState<number|null>(null)
+  const [manualCostPerKg, setManualCostPerKg] = useState<number>(0)
   const [showGross, setShowGross]   = useState(false)
 
   // Schritt 1: Rohstoff-Preis
@@ -90,6 +92,15 @@ export default function MarginsPage() {
   const pctOk  = Math.abs(pctSum - 100) < 0.01 || recipePositions.length === 0
 
   // Schritt 3: 2K Mischung
+  const {data:allProducts=[]}=useQuery<any[]>({queryKey:['products'],queryFn:()=>window.api.products.list() as Promise<any[]>})
+  const {data:productDetail}=useQuery<any>({queryKey:['product-detail',selectedProductId],queryFn:()=>selectedProductId?window.api.products.get(selectedProductId):null,enabled:!!selectedProductId})
+  const selectedProduct=(allProducts as any[]).find((p:any)=>p.id===selectedProductId)??null
+  const productTotalCost=useMemo(()=>(productDetail?.materials??[]).reduce((s:number,m:any)=>s+(m.pref_price??0)*m.quantity,0),[productDetail])
+  const productCostPerKg=useMemo(()=>{
+    if(productTotalCost>0&&selectedProduct?.batch_size>0) return productTotalCost/selectedProduct.batch_size
+    return manualCostPerKg
+  },[productTotalCost,selectedProduct,manualCostPerKg])
+
   const [use2k, setUse2k]   = useState(false)
   const [twoK, setTwoK]     = useState<TwoKProduct>({ comp_a_cost_per_kg:0, comp_b_cost_per_kg:0, ratio_a:100, ratio_b:50 })
   const twoKResult = useMemo(() => calcTwoKProduct(twoK), [twoK])
@@ -103,7 +114,7 @@ export default function MarginsPage() {
   const sk = (k: keyof typeof sell, v: number) => setSell(s => ({...s, [k]: v}))
 
   // Material-Kosten für Kalkulation
-  const materialCostForCalc = use2k ? twoKResult.cost_per_kg_set : costPerKgRecipe || matResult.total_net_per_unit
+  const materialCostForCalc = use2k ? twoKResult.cost_per_kg_set : costPerKgRecipe || productCostPerKg
 
   // Gesamtkalkulation
   const result = useMemo(() => {
@@ -141,162 +152,73 @@ export default function MarginsPage() {
       </div>
 
       <div className="space-y-3">
-        {/* ── SCHRITT 1: Rohstoff-Preis ── */}
-        <Step n={1} title="Rohstoff-Preis berechnen" icon={<FlaskConical size={14}/>}
-          active={activeStep===0} done={matResult.total_net_per_unit>0 && activeStep>0}
+        {/* ── SCHRITT 1: Rohstoff aus Datenbank wählen ── */}
+        <Step n={1} title="Produkt auswählen" icon={<Package size={14}/>}
+          active={activeStep===0} done={materialCostForCalc>0 && activeStep>0}
           onClick={() => setActiveStep(activeStep===0?-1:0)}>
           <div className="mt-4 space-y-4">
-            {/* Basis */}
-            <div>
-              <p className="text-xs font-bold text-brand-400 uppercase tracking-wider mb-2">Basiseinkaufspreis</p>
-              <div className="grid grid-cols-3 gap-3">
-                <Input label="Preis (€ netto)" type="number" step="0.01"
-                  value={matPrice.base_price||''} onChange={e=>mp('base_price',Number(e.target.value))}
-                  hint="z.B. 2123.20"/>
-                <Input label="Menge" type="number" step="1"
-                  value={matPrice.base_quantity||''} onChange={e=>mp('base_quantity',Number(e.target.value))}
-                  hint="z.B. 1000"/>
-                <Select label="Einheit" value={matPrice.base_unit}
-                  onChange={e=>mp('base_unit',e.target.value)}>
-                  {['kg','l','g','ml','stk'].map(u=><option key={u} value={u}>{u}</option>)}
-                </Select>
-              </div>
-              {matPrice.base_price>0 && matPrice.base_quantity>0 && (
-                <p className="text-xs text-emerald-400 mt-1.5 flex items-center gap-1">
-                  <CheckCircle size={11}/> = <strong>{f4(matResult.base_per_unit)} €</strong> pro 1 {matPrice.base_unit}
-                </p>
-              )}
-            </div>
-
-            {/* ADR */}
-            <div className="p-3 rounded-xl" style={{background:'rgb(255 255 255/0.02)',border:'1px solid rgb(255 255 255/0.05)'}}>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-semibold text-slate-300">ADR-Zuschlag <span className="text-slate-500 font-normal">(optional – Gefahrgut)</span></p>
-                <button onClick={() => mp('adr_enabled', !matPrice.adr_enabled)}
-                  className={`relative w-9 h-5 rounded-full transition-colors ${matPrice.adr_enabled?'bg-brand-500':'bg-slate-700'}`}>
-                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${matPrice.adr_enabled?'translate-x-4':'translate-x-0.5'}`}/>
-                </button>
-              </div>
-              {matPrice.adr_enabled && (
-                <div className="grid grid-cols-3 gap-2">
-                  <Input label="Betrag (€)" type="number" step="0.01"
-                    value={matPrice.adr_amount||''} onChange={e=>mp('adr_amount',Number(e.target.value))}
-                    hint="z.B. 6.90"/>
-                  <Input label={`Pro ___ ${matPrice.base_unit}`} type="number" step="1"
-                    value={matPrice.adr_per_qty||''} onChange={e=>mp('adr_per_qty',Number(e.target.value))}
-                    hint="z.B. 100"/>
-                  <div className="flex items-end">
-                    {matPrice.adr_amount>0 && matPrice.adr_per_qty>0 && (
-                      <p className="text-xs text-cyan-400 pb-2">
-                        = {f4(matResult.adr_per_unit)} € / {matPrice.base_unit}
-                      </p>
-                    )}
+            <p className="text-xs text-slate-500 p-3 rounded-xl"
+              style={{background:'rgb(139 92 246/0.06)',border:'1px solid rgb(139 92 246/0.15)'}}>
+              💡 Wähle ein fertiges Produkt. Der Herstellpreis wird automatisch aus der Rezeptur (Rohstoffe) berechnet.
+              Produkte ohne Rezept zeigen nur den manuellen EK-Preis.
+            </p>
+            <Select label="Produkt auswählen *" value={selectedProductId||''}
+              onChange={e=>setSelectedProductId(Number(e.target.value)||null)}>
+              <option value="">– Produkt wählen –</option>
+              {(allProducts as any[]).map((p:any)=>(
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.code})
+                  {p.material_count>0 ? ` — ${p.material_count} Rohstoffe` : ' — kein Rezept'}
+                </option>
+              ))}
+            </Select>
+            {selectedProduct && (
+              <div className="p-4 rounded-xl space-y-3" style={{background:'rgb(139 92 246/0.08)',border:'1px solid rgb(139 92 246/0.25)'}}>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="text-sm font-bold text-white">{selectedProduct.name}</p>
+                    <p className="text-xs text-slate-500">{selectedProduct.code} · {selectedProduct.batch_size} {selectedProduct.batch_unit} Batch</p>
+                    {selectedProduct.group_name&&<p className="text-xs text-slate-500">{selectedProduct.group_name}</p>}
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-slate-500">Herstellkosten / kg</p>
+                    <p className="text-2xl font-black text-brand-400">
+                      {productCostPerKg>0 ? fEur(productCostPerKg) : '–'}
+                    </p>
                   </div>
                 </div>
-              )}
-            </div>
-
-            {/* Umweltabgabe */}
-            <div className="p-3 rounded-xl" style={{background:'rgb(255 255 255/0.02)',border:'1px solid rgb(255 255 255/0.05)'}}>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-semibold text-slate-300">Umweltabgabe <span className="text-slate-500 font-normal">(optional)</span></p>
-                <button onClick={() => mp('env_enabled', !matPrice.env_enabled)}
-                  className={`relative w-9 h-5 rounded-full transition-colors ${matPrice.env_enabled?'bg-brand-500':'bg-slate-700'}`}>
-                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${matPrice.env_enabled?'translate-x-4':'translate-x-0.5'}`}/>
-                </button>
-              </div>
-              {matPrice.env_enabled && (
-                <div className="grid grid-cols-2 gap-2">
-                  <Input label="Betrag" type="number" step="0.001"
-                    value={matPrice.env_amount||''} onChange={e=>mp('env_amount',Number(e.target.value))}/>
-                  <Select label="Typ" value={matPrice.env_type} onChange={e=>mp('env_type',e.target.value)}>
-                    <option value="per_unit">Pro {matPrice.base_unit}</option>
-                    <option value="percent">% auf EK</option>
-                  </Select>
-                </div>
-              )}
-            </div>
-
-            {/* Transportkosten */}
-            <div className="p-3 rounded-xl" style={{background:'rgb(255 255 255/0.02)',border:'1px solid rgb(255 255 255/0.05)'}}>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-semibold text-slate-300">Transportkosten <span className="text-slate-500 font-normal">(optional – wird anteilig aufgeteilt)</span></p>
-                <button onClick={() => mp('transport_enabled', !matPrice.transport_enabled)}
-                  className={`relative w-9 h-5 rounded-full transition-colors ${matPrice.transport_enabled?'bg-brand-500':'bg-slate-700'}`}>
-                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${matPrice.transport_enabled?'translate-x-4':'translate-x-0.5'}`}/>
-                </button>
-              </div>
-              {matPrice.transport_enabled && (
-                <div className="grid grid-cols-2 gap-2">
-                  <Input label="Frachtkosten gesamt (€)" type="number" step="0.01"
-                    value={matPrice.transport_amount||''} onChange={e=>mp('transport_amount',Number(e.target.value))}
-                    hint="Gesamtkosten der Lieferung"/>
-                  <Input label="Gesamtgewicht Fracht (kg)" type="number" step="1"
-                    value={matPrice.transport_freight_kg||''} onChange={e=>mp('transport_freight_kg',Number(e.target.value))}
-                    hint="z.B. 1000 kg"/>
-                </div>
-              )}
-              {matPrice.transport_enabled && matPrice.transport_amount>0 && matPrice.transport_freight_kg>0 && (
-                <p className="text-xs text-cyan-400 mt-1.5">= {f4(matResult.transport_per_unit)} € / {matPrice.base_unit}</p>
-              )}
-            </div>
-
-            {/* Eigene Gebühren */}
-            <div className="p-3 rounded-xl" style={{background:'rgb(255 255 255/0.02)',border:'1px solid rgb(255 255 255/0.05)'}}>
-              <p className="text-xs font-semibold text-slate-300 mb-2">Weitere Gebühren <span className="text-slate-500 font-normal">(benutzerdefiniert)</span></p>
-              {matPrice.custom_fees.map((f,i) => (
-                <div key={f.id} className="flex items-center justify-between py-1 text-xs text-slate-400">
-                  <span>{f.name}</span>
+                {productDetail?.materials?.length>0&&(
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-600">Rezeptur</p>
+                    {productDetail.materials.map((m:any)=>(
+                      <div key={m.id} className="flex justify-between text-xs">
+                        <span className="text-slate-400">{m.material_name} ({m.quantity} {m.unit})</span>
+                        <span className="text-slate-300 font-mono">
+                          {m.pref_price!=null?fEur(m.pref_price*m.quantity):'-'}
+                        </span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between text-sm font-bold pt-1 border-t border-white/10">
+                      <span className="text-slate-300">Gesamt ({selectedProduct.batch_size} {selectedProduct.batch_unit})</span>
+                      <span className="text-white">{fEur(productTotalCost)}</span>
+                    </div>
+                  </div>
+                )}
+                {(!productDetail?.materials?.length)&&(
+                  <p className="text-xs text-amber-400">⚠ Kein Rezept — bitte manuellen EK-Preis eingeben</p>
+                )}
+                {(!productDetail?.materials?.length)&&(
                   <div className="flex items-center gap-2">
-                    <span className="text-slate-300">{f.type==='percent'?`${f.amount}%`:`${f.amount} €`}</span>
-                    <button onClick={() => mp('custom_fees', matPrice.custom_fees.filter((_,j)=>j!==i))}
-                      className="text-red-400 hover:text-red-300"><Trash2 size={11}/></button>
+                    <Input label="Manueller EK / kg (€)" type="number" step="0.001"
+                      value={manualCostPerKg||''} onChange={e=>setManualCostPerKg(Number(e.target.value))}/>
                   </div>
-                </div>
-              ))}
-              <div className="grid grid-cols-3 gap-2 mt-2">
-                <Input label="Bezeichnung" value={customFeeForm.name} onChange={e=>setCustomFeeForm(f=>({...f,name:e.target.value}))} placeholder="z.B. Zoll"/>
-                <Input label="Betrag" type="number" step="0.001" value={customFeeForm.amount} onChange={e=>setCustomFeeForm(f=>({...f,amount:e.target.value as unknown as number}))}/>
-                <Select label="Typ" value={customFeeForm.type} onChange={e=>setCustomFeeForm(f=>({...f,type:e.target.value as 'per_unit'}))}>
-                  <option value="per_unit">Pro {matPrice.base_unit}</option>
-                  <option value="percent">%</option>
-                  <option value="per_freight">Pro Fracht</option>
-                </Select>
+                )}
               </div>
-              <button onClick={() => {
-                if (!customFeeForm.name || !customFeeForm.amount) return
-                mp('custom_fees', [...matPrice.custom_fees, { id:Date.now().toString(), name:customFeeForm.name, amount:Number(customFeeForm.amount), type:customFeeForm.type }])
-                setCustomFeeForm({name:'',amount:'',type:'per_unit'})
-              }} className="mt-2 text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1">
-                <Plus size={11}/> Gebühr hinzufügen
-              </button>
-            </div>
-
-            {/* Ergebnis */}
-            <div className="p-4 rounded-xl" style={{background:'rgb(139 92 246/0.08)',border:'1px solid rgb(139 92 246/0.25)'}}>
-              <p className="text-xs font-bold text-brand-400 mb-3">Aufstellung pro 1 {matPrice.base_unit}</p>
-              {matResult.breakdown.map((b,i) => (
-                <div key={i} className="flex justify-between text-xs py-0.5">
-                  <span className="text-slate-500">{b.label}</span>
-                  <span className="text-slate-300 font-mono">{f4(b.per_unit)} €</span>
-                </div>
-              ))}
-              <div className="flex justify-between text-sm font-bold pt-2 mt-2 border-t border-white/10">
-                <span className="text-slate-200">Gesamt netto / 1 {matPrice.base_unit}</span>
-                <span className="text-white text-base">{fEur(matResult.total_net_per_unit)}</span>
-              </div>
-              {showGross && (
-                <div className="flex justify-between text-xs pt-1">
-                  <span className="text-slate-500">inkl. {matPrice.vat_rate}% MwSt.</span>
-                  <span className="text-emerald-400 font-mono font-semibold">{fEur(matResult.total_gross_per_unit)}</span>
-                </div>
-              )}
-            </div>
-
-            <button onClick={() => setActiveStep(1)}
-              className="w-full py-2 rounded-xl text-xs font-semibold text-white transition-colors hover:bg-brand-500/30"
+            )}
+            <button onClick={() => setActiveStep(1)} disabled={!selectedProduct}
+              className={`w-full py-2 rounded-xl text-xs font-semibold text-white transition-colors ${selectedProduct?'hover:bg-brand-500/30':'opacity-40 cursor-not-allowed'}`}
               style={{background:'rgb(139 92 246/0.2)',border:'1px solid rgb(139 92 246/0.3)'}}>
-              Weiter zu Rezeptur →
+              Weiter zu Variante & Verpackung →
             </button>
           </div>
         </Step>

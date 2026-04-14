@@ -53,7 +53,7 @@ export default function App() {
             <Route path="customers"     element={<CustomersPage/>}/>
             <Route path="discounts"     element={<DiscountsPage/>}/>
             <Route path="documents"     element={<PlaceholderPage title="Dokumentenablage"/>}/>
-            <Route path="components"    element={<RecipesPage/>}/>
+
             <Route path="recipes"       element={<RecipesPage/>}/>
             <Route path="settings"      element={<SettingsPage/>}/>
           </Route>

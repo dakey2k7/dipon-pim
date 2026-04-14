@@ -5,6 +5,8 @@ import { SCHEMA_SQL, SEED_SQL }                   from './schema'
 import { SCHEMA_PHASE2_SQL, SEED_PHASE2_SQL }     from './schema-phase2'
 import { SCHEMA_PRODUCTS_SQL, SEED_PRODUCTS_SQL } from './schema-products'
 import { SCHEMA_DOCS_SQL, SCHEMA_DISCOUNTS_SQL }  from './schema-docs'
+import { SCHEMA_MATERIALS_V2_COLUMNS } from './schema-materials-v2'
+import { seedMaterials }        from './seed-materials'
 import { SCHEMA_AUDIT_SQL }                       from './schema-audit'
 
 let _db: Database.Database | null = null
@@ -25,6 +27,16 @@ export function getDb(): Database.Database {
   _db.exec(SCHEMA_PRODUCTS_SQL)
   _db.exec(SCHEMA_DOCS_SQL)
   _db.exec(SCHEMA_DISCOUNTS_SQL)
+  // Schema v2: neue Materialfelder (einzeln, damit keine Fehler bei bereits existierenden Spalten)
+  for (const sql of SCHEMA_MATERIALS_V2_COLUMNS) {
+    try { _db.exec(sql) } catch {} // Ignoriert "duplicate column" Fehler
+  }
+  // Seed-Daten
+  try {
+    seedMaterials(_db)
+  } catch (e) {
+    console.error('Seed-Fehler:', e)
+  }
   _db.exec(SCHEMA_AUDIT_SQL)
   // Migrations
   addColumnIfMissing(_db, 'supplier_prices', 'invoice_reference', 'TEXT')

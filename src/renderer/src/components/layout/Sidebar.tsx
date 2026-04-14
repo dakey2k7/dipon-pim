@@ -41,7 +41,6 @@ const NAV_GROUPS = [
   ]},
   { label:'Produkte', items:[
     { label:'Produkte',        path:'/products',      icon:<Package size={15}/>,         color:'#8b5cf6' },
-    { label:'Komponenten',     path:'/components',    icon:<Beaker size={15}/>,          color:'#a78bfa' },
     { label:'Rezepturen',      path:'/recipes',       icon:<Layers size={15}/>,          color:'#c4b5fd' },
   ]},
   { label:'Kalkulation', items:[

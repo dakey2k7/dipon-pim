@@ -118,3 +118,45 @@ ipcMain.handle('suppliers:deleteCondition', (_e, condId: number) => {
   getDb().prepare('DELETE FROM supplier_conditions WHERE id=?').run(condId)
   return { success: true }
 })
+
+  // Rohstoffe eines Lieferanten – über supplier_id Spalte ODER supplier_prices
+  ipcMain.handle('suppliers:getMaterials', (_e, supplierId: number) => {
+    const db = getDb()
+    // Versuche zuerst neue supplier_id Spalte, dann fallback auf supplier_prices
+    let results: unknown[] = []
+    try {
+      results = db.prepare(`
+        SELECT DISTINCT
+          m.id, m.name, m.code,
+          COALESCE(m.product_type, '') AS product_type,
+          m.density, m.cas_number,
+          COALESCE(m.base_unit, m.unit, 'kg') AS base_unit,
+          m.base_price, m.base_quantity,
+          COALESCE(m.surcharge_energy, 0) AS surcharge_energy,
+          COALESCE(m.surcharge_energy_unit, '100 kg') AS surcharge_energy_unit,
+          COALESCE(m.surcharge_adr, 0) AS surcharge_adr,
+          COALESCE(m.surcharge_adr_unit, '100 kg') AS surcharge_adr_unit,
+          m.price_per_kg_calc,
+          COALESCE(m.wgk, '-') AS wgk,
+          m.valid_from, m.is_active,
+          m.container_type, m.container_size,
+          COALESCE(m.deposit_amount, 0) AS deposit_amount,
+          m.deposit_note
+        FROM materials m
+        LEFT JOIN supplier_prices sp ON sp.material_id = m.id AND sp.supplier_id = ?
+        WHERE m.supplier_id = ? OR sp.supplier_id = ?
+        ORDER BY m.product_type ASC, m.name ASC
+      `).all(supplierId, supplierId, supplierId)
+    } catch (e) {
+      // Fallback ohne neue Spalten
+      results = db.prepare(`
+        SELECT DISTINCT m.id, m.name, m.code, m.unit AS base_unit,
+          m.density, m.cas_number, m.is_active
+        FROM materials m
+        JOIN supplier_prices sp ON sp.material_id = m.id
+        WHERE sp.supplier_id = ?
+        ORDER BY m.name ASC
+      `).all(supplierId)
+    }
+    return results
+  })

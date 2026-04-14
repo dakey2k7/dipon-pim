@@ -9,16 +9,3 @@ data/*.db-shm
 data/*.db-wal
 *.log
 .env
-
-data/
-src/renderer/src/src/
-src/renderer/src/scripts/
-src/renderer/src/server/
-src/renderer/src/package*.json
-src/renderer/src/postcss*
-src/renderer/src/tailwind*
-src/renderer/src/tsconfig*
-src/renderer/src/vite*
-src/renderer/src/electron*
-src/renderer/src/README*
-src/renderer/src/*.json

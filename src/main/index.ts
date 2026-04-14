@@ -87,7 +87,7 @@ app.whenReady().then(() => {
           "default-src 'self'; " +
           "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
           "style-src 'self' 'unsafe-inline'; " +
-          "img-src 'self' data: blob: https://flagcdn.com https://cdn.jsdelivr.net; " +
+          "img-src 'self' data: blob: https://flagcdn.com https://cdn.jsdelivr.net https://upload.wikimedia.org; " +
           "connect-src 'self' https://api.frankfurter.app https://ec.europa.eu https://evatr.bff-online.de; " +
           "font-src 'self' data:;"
         ]

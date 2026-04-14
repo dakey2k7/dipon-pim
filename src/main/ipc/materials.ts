@@ -10,6 +10,7 @@ export function registerMaterialHandlers(): void {
       SELECT m.*, c.name AS category_name, c.color AS category_color,
         sp.price_per_unit AS preferred_price, sp.currency AS preferred_currency,
         sp.unit AS preferred_unit, s.name AS preferred_supplier,
+        s.name AS supplier_name,
         (SELECT COUNT(*) FROM supplier_prices sp2 WHERE sp2.material_id = m.id) AS supplier_count
       FROM materials m
       LEFT JOIN categories c ON c.id = m.category_id
@@ -26,7 +27,18 @@ export function registerMaterialHandlers(): void {
     if (params.category_id) { sql += ' AND m.category_id = ?'; p.push(params.category_id) }
     if (params.low_stock)   { sql += ' AND m.current_stock <= m.min_stock' }
     sql += ' ORDER BY m.name ASC'
-    return db.prepare(sql).all(...p)
+    let rows = db.prepare(sql).all(...p)
+    // Supplier-Name aus supplier_id Spalte nachladen falls vorhanden
+    try {
+      rows = (rows as any[]).map(r => {
+        if (!r.supplier_name && r.supplier_id) {
+          const sup = db.prepare('SELECT name FROM suppliers WHERE id=?').get(r.supplier_id) as any
+          return { ...r, supplier_name: sup?.name ?? null }
+        }
+        return r
+      })
+    } catch {}
+    return rows
   })
 
   ipcMain.handle('materials:get', (_e, id: number) => {
@@ -64,7 +76,35 @@ export function registerMaterialHandlers(): void {
       d.storage_conditions||null, d.shelf_life_months||null,
       d.is_hazardous?1:0, d.is_active??1
     )
-    return db.prepare('SELECT * FROM materials WHERE id = ?').get(r.lastInsertRowid)
+    const newId = r.lastInsertRowid as number
+    // Neue Felder via UPDATE (falls Spalten existieren)
+    const newFields = [
+      ['substance_name_de',d.substance_name_de||null],
+      ['substance_name_en',d.substance_name_en||null],
+      ['container_type',d.container_type||null],
+      ['container_size',d.container_size||null],
+      ['base_price',d.base_price!=null?Number(d.base_price):null],
+      ['base_quantity',d.base_quantity?Number(d.base_quantity):1],
+      ['base_unit',d.base_unit||'kg'],
+      ['surcharge_energy',Number(d.surcharge_energy)||0],
+      ['surcharge_energy_unit',d.surcharge_energy_unit||'100 kg'],
+      ['surcharge_adr',Number(d.surcharge_adr)||0],
+      ['surcharge_adr_unit',d.surcharge_adr_unit||'100 kg'],
+      ['price_per_kg_calc',d.price_per_kg_calc?Number(d.price_per_kg_calc):null],
+      ['product_type',d.product_type||null],
+      ['supplier_id',d.supplier_id?Number(d.supplier_id):null],
+      ['deposit_amount',Number(d.deposit_amount)||0],
+      ['deposit_note',d.deposit_note||null],
+      ['wgk',d.wgk||'-'],
+      ['valid_from',d.valid_from||null],
+      ['ghs_symbols',d.ghs_symbols||'[]'],
+      ['un_number',d.un_number||null],
+      ['customs_tariff',d.customs_tariff||null],
+    ]
+    for (const [col, val] of newFields) {
+      try { db.prepare(`UPDATE materials SET ${col}=? WHERE id=?`).run(val, newId) } catch {}
+    }
+    return db.prepare('SELECT * FROM materials WHERE id = ?').get(newId)
   })
 
   ipcMain.handle('materials:update', (_e, id: number, d: Record<string, unknown>) => {
@@ -154,3 +194,90 @@ export function registerMaterialHandlers(): void {
     return { success: true }
   })
 }
+
+// Seed manuell auslösen
+ipcMain.handle('materials:runSeed', () => {
+  const db = getDb()
+  // Prüfen ob DIPON-Rohstoffe bereits da
+  const existing = db.prepare("SELECT id FROM materials WHERE code='EPI-827'").get()
+  if (existing) return { count: 0, message: 'DIPON-Rohstoffe bereits vorhanden' }
+
+  try {
+    const { seedMaterials } = require('../database/seed-materials')
+    seedMaterials(db)
+    const count = (db.prepare('SELECT COUNT(*) as c FROM materials').get() as {c:number}).c
+    return { count, message: `${count} Rohstoffe eingespielt` }
+  } catch (e) {
+    return { count: 0, message: `Fehler: ${(e as Error).message}` }
+  }
+})
+
+// ── CSV Import ─────────────────────────────────────────────────
+ipcMain.handle('materials:importCSV', (_e, rows: Record<string, string>[]) => {
+  const db = getDb()
+  let imported = 0; const errors: string[] = []
+
+  for (const row of rows) {
+    try {
+      if (!row.name || !row.code) { errors.push(`Zeile übersprungen: Name/Code fehlt`); continue }
+
+      // Lieferant anlegen falls nötig
+      let supplierId: number | null = null
+      if (row.lieferant) {
+        const ex = db.prepare('SELECT id FROM suppliers WHERE name=?').get(row.lieferant) as any
+        if (ex) { supplierId = ex.id }
+        else { supplierId = (db.prepare(`INSERT INTO suppliers (name,code,is_active) VALUES (?,?,1)`).run(row.lieferant, row.lieferant.replace(/[^A-Z0-9]/gi,'').toUpperCase().slice(0,10))).lastInsertRowid as number }
+      }
+
+      // Kategorie
+      let catId: number | null = null
+      if (row.kategorie) {
+        const exCat = db.prepare('SELECT id FROM categories WHERE name=?').get(row.kategorie) as any
+        if (exCat) { catId = exCat.id }
+        else { catId = (db.prepare(`INSERT INTO categories (name,code) VALUES (?,?)`).run(row.kategorie, row.kategorie.toUpperCase().slice(0,6))).lastInsertRowid as number }
+      }
+
+      db.prepare(`INSERT OR REPLACE INTO materials (name,code,category_id,unit,cas_number,is_active) VALUES (?,?,?,?,?,1)`)
+        .run(row.name, row.code.toUpperCase(), catId, row.einheit||'kg', row.cas||null)
+
+      const mat = db.prepare('SELECT id FROM materials WHERE code=?').get(row.code.toUpperCase()) as any
+      if (!mat) continue
+      const id = mat.id
+
+      const trySet = (col: string, val: unknown) => { try { db.prepare(`UPDATE materials SET ${col}=? WHERE id=?`).run(val, id) } catch {} }
+
+      if (row.dichte)              trySet('density',              row.dichte)
+      if (row.gebinde)             trySet('container_type',       row.gebinde)
+      if (row.gebinde_menge)       trySet('container_size',       row.gebinde_menge)
+      if (row.preis)               trySet('base_price',           parseFloat(row.preis.replace(',','.')))
+      if (row.preis_menge)         trySet('base_quantity',        parseFloat(row.preis_menge))
+      if (row.preis_einheit)       trySet('base_unit',            row.preis_einheit)
+      if (row.maut_zuschlag)       trySet('surcharge_energy',     parseFloat(row.maut_zuschlag.replace(',','.')))
+      if (row.maut_einheit)        trySet('surcharge_energy_unit',row.maut_einheit)
+      if (row.adr_zuschlag)        trySet('surcharge_adr',        parseFloat(row.adr_zuschlag.replace(',','.')))
+      if (row.adr_einheit)         trySet('surcharge_adr_unit',   row.adr_einheit)
+      if (row.produktart)          trySet('product_type',         row.produktart)
+      if (row.wgk)                 trySet('wgk',                  row.wgk)
+      if (row.gueltig_ab)          trySet('valid_from',           row.gueltig_ab)
+      if (row.pfand)               trySet('deposit_amount',       parseFloat(row.pfand.replace(',','.')))
+      if (row.pfand_hinweis)       trySet('deposit_note',         row.pfand_hinweis)
+      if (row.stoffbezeichnung_de) trySet('substance_name_de',    row.stoffbezeichnung_de)
+      if (supplierId !== null)     trySet('supplier_id',          supplierId)
+
+      // Preis/kg berechnen
+      const base = parseFloat(row.preis?.replace(',','.') || '0')
+      const qty  = parseFloat(row.preis_menge || '1')
+      const eng  = parseFloat(row.maut_zuschlag?.replace(',','.') || '0')
+      const adr  = parseFloat(row.adr_zuschlag?.replace(',','.') || '0')
+      const engQ = parseFloat(row.maut_einheit || '100')
+      const adrQ = parseFloat(row.adr_einheit  || '100')
+      if (base > 0 && qty > 0) {
+        const calc = (base/qty) + (eng/engQ) + (adr/adrQ)
+        trySet('price_per_kg_calc', Math.round(calc*10000)/10000)
+      }
+
+      imported++
+    } catch (e) { errors.push(`${row.code}: ${(e as Error).message}`) }
+  }
+  return { imported, errors }
+})

@@ -17,6 +17,7 @@ const api = {
     update:       (id: number, d: unknown) => ipcRenderer.invoke('suppliers:update', id, d),
     toggleActive:      (id: number)               => ipcRenderer.invoke('suppliers:toggleActive', id),
     getConditions:     (id: number)               => ipcRenderer.invoke('suppliers:getConditions', id),
+    getMaterials:      (id: number)               => ipcRenderer.invoke('suppliers:getMaterials', id),
     saveCondition:     (id: number, d: unknown)   => ipcRenderer.invoke('suppliers:saveCondition', id, d),
     deleteCondition:   (id: number)               => ipcRenderer.invoke('suppliers:deleteCondition', id),
     delete:       (id: number) => ipcRenderer.invoke('suppliers:delete', id),

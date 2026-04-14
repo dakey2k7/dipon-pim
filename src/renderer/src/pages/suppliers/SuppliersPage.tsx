@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Pencil, Trash2, Truck, Mail, Phone, Power } from 'lucide-react'
+import { Plus, Pencil, Trash2, Truck, Mail, Phone, Power, FlaskConical, X, ChevronRight } from 'lucide-react'
 import { api }          from '@/lib/api'
 import { Button }       from '@/components/ui/Input'
 import { Modal }        from '@/components/ui/Modal'
@@ -70,6 +72,141 @@ function SupplierForm({initial,onSubmit,onCancel,loading}:{initial?:Supplier;onS
   )
 }
 
+// ── Lieferanten-Materialien Drawer ───────────────────────────
+const fmtEur=(v:number)=>new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR',minimumFractionDigits:4}).format(v)
+const WGK_COLORS:Record<string,string>={'-':'#64748b','WGK1':'#22c55e','WGK2':'#f59e0b','WGK3':'#ef4444'}
+
+function SupplierMaterialsDrawer({supplier, onClose}:{supplier:any; onClose:()=>void}) {
+  const navigate = useNavigate()
+  const [expandedMat, setExpandedMat] = useState<number|null>(null)
+  const {data:materials=[],isLoading}=useQuery<any[]>({
+    queryKey:['supplier-materials',supplier.id],
+    queryFn:()=>window.api.suppliers.getMaterials(supplier.id) as Promise<any[]>,
+  })
+
+  const byType=new Map<string,any[]>()
+  for(const m of materials){
+    const k=m.product_type||'Sonstige'
+    byType.set(k,[...(byType.get(k)||[]),m])
+  }
+
+  return(
+    <div className="fixed inset-0 flex justify-end" style={{zIndex:9999,background:'rgb(0 0 0/0.5)',left:0,top:0,right:0,bottom:0}}>
+      <div className="h-full flex flex-col shadow-2xl overflow-hidden" style={{width:680,maxWidth:'calc(100vw - 40px)'}}
+        style={{background:'#0f1124',borderLeft:'1px solid rgb(139 92 246/0.2)'}}>
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-white/5 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-white"
+              style={{background:'linear-gradient(135deg,#7c3aed,#4a57e5)'}}>
+              {supplier.name.slice(0,2).toUpperCase()}
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white">{supplier.name}</h3>
+              <p className="text-xs text-slate-500">
+                {materials.length} Rohstoff{materials.length!==1?'e':''} · {supplier.city||'–'} · {supplier.country||'–'}
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="btn-ghost p-2"><X size={16}/></button>
+        </div>
+
+        {/* Kontakt-Info */}
+        <div className="px-5 py-3 border-b border-white/5 shrink-0">
+          <div className="flex gap-6 text-xs text-slate-400">
+            {supplier.email&&<a href={`mailto:${supplier.email}`} className="flex items-center gap-1.5 hover:text-brand-400"><Mail size={11}/>{supplier.email}</a>}
+            {supplier.phone&&<span className="flex items-center gap-1.5"><Phone size={11}/>{supplier.phone}</span>}
+            {supplier.payment_terms&&<span>Zahlungsziel: <strong className="text-slate-300">{supplier.payment_terms} Tage</strong></span>}
+            {supplier.lead_time_days&&<span>Lieferzeit: <strong className="text-slate-300">{supplier.lead_time_days} Tage</strong></span>}
+          </div>
+        </div>
+
+        {/* Rohstoffe */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {isLoading&&<div className="text-center py-8 text-slate-600">Lädt…</div>}
+          {!isLoading&&!materials.length&&(
+            <div className="text-center py-12">
+              <FlaskConical size={40} className="text-slate-700 mx-auto mb-3"/>
+              <p className="text-slate-500 text-sm">Keine Rohstoffe für diesen Lieferanten</p>
+              <p className="text-xs text-slate-600 mt-1">Rohstoffe werden beim Anlegen einem Lieferanten zugeordnet</p>
+            </div>
+          )}
+          {[...byType.entries()].map(([type,mats])=>(
+            <div key={type}>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-2">{type} ({mats.length})</p>
+              <div className="space-y-2">
+                {mats.map((m:any)=>{
+                  const wgkColor=WGK_COLORS[m.wgk||'-']
+                  return(
+                    <div key={m.id} className="rounded-xl overflow-hidden transition-all"
+                      style={{background:'rgb(255 255 255/0.03)',border:expandedMat===m.id?'1px solid rgb(139 92 246/0.3)':'1px solid rgb(255 255 255/0.06)'}}>
+                      <div className="flex items-start justify-between p-3 cursor-pointer hover:bg-white/3"
+                        onClick={()=>setExpandedMat(expandedMat===m.id?null:m.id)}>
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <FlaskConical size={13} className="text-brand-400 shrink-0 mt-0.5"/>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-semibold text-slate-200 truncate">{m.name}</p>
+                              <span className="text-[10px] font-mono text-slate-500 shrink-0">{m.code}</span>
+                            </div>
+                            <div className="flex items-center gap-3 mt-0.5">
+                              {m.cas_number&&<span className="text-[10px] font-mono text-slate-500">CAS: {m.cas_number}</span>}
+                              {m.density&&<span className="text-[10px] text-slate-500">{m.density}</span>}
+                              {m.container_type&&<span className="text-[10px] text-slate-600">{m.container_type} {m.container_size}</span>}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0 ml-3">
+                          <span className="text-xs px-2 py-0.5 rounded-full font-semibold"
+                            style={{background:`${wgkColor}20`,color:wgkColor,border:`1px solid ${wgkColor}40`}}>
+                            {m.wgk||'-'}
+                          </span>
+                          {m.price_per_kg_calc!=null&&(
+                            <span className="text-sm font-bold text-slate-200 font-mono">
+                              {fmtEur(m.price_per_kg_calc)}<span className="text-slate-500 text-xs font-normal">/kg</span>
+                            </span>
+                          )}
+                        </div>
+                        <ChevronRight size={13} className={`text-slate-600 shrink-0 transition-transform ${expandedMat===m.id?'rotate-90':''}`}/>
+                      </div>
+                      {/* Aufgeklappte Details */}
+                      {expandedMat===m.id&&(
+                        <div className="px-3 pb-3 space-y-2 border-t border-white/5">
+                          {m.base_price&&(
+                            <div className="pt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+                              <span className="text-slate-500">EK-Preis: <strong className="text-slate-200">{m.base_price} € / {m.base_quantity} {m.base_unit}</strong></span>
+                              {m.price_per_kg_calc&&<span className="text-emerald-400 font-bold">→ {fmtEur(m.price_per_kg_calc)} / kg</span>}
+                              {m.surcharge_energy>0&&<span className="text-amber-400">Maut/Energie: +{m.surcharge_energy} € / {m.surcharge_energy_unit}</span>}
+                              {m.surcharge_adr>0&&<span className="text-red-400">ADR-Zuschlag: +{m.surcharge_adr} € / {m.surcharge_adr_unit}</span>}
+                              {m.deposit_amount>0&&<span className="text-slate-500">Pfand: {m.deposit_amount} € {m.deposit_note||''} (nicht kalkuliert)</span>}
+                              {m.valid_from&&<span className="text-slate-600">Gültig ab: {m.valid_from}</span>}
+                            </div>
+                          )}
+                          {m.cas_number&&<p className="text-[11px] text-slate-500">CAS: <span className="font-mono text-slate-300">{m.cas_number}</span></p>}
+                          <div className="flex justify-end pt-1">
+                            <button
+                              onClick={()=>{onClose(); setTimeout(()=>navigate('/materials'),100)}}
+                              className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1">
+                              <FlaskConical size={11}/> Zu Rohstoffe →
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* Backdrop click */}
+      <div className="flex-1" onClick={onClose}/>
+    </div>
+  )
+}
+
+
 export default function SuppliersPage() {
   const qc=useQueryClient(); const toast=useToast()
   const [search,setSearch]=useState('')
@@ -78,6 +215,7 @@ export default function SuppliersPage() {
   const [open,setOpen]=useState(false)
   const [editing,setEditing]=useState<Supplier|undefined>()
   const [deleting,setDeleting]=useState<Supplier|undefined>()
+  const [drawerSupplier,setDrawerSupplier]=useState<any>(null)
   const {data,isLoading}=useQuery<Supplier[]>({queryKey:['suppliers',search],queryFn:()=>api.suppliers.list(search||undefined)})
   const suppliers=(data??[]).sort((a,b)=>{
     if(sortBy==='name_asc')  return a.name.localeCompare(b.name)
@@ -161,7 +299,8 @@ export default function SuppliersPage() {
                     <td className="table-td text-center"><Badge variant={s.is_active?'green':'slate'}>{s.is_active?'Aktiv':'Inaktiv'}</Badge></td>
                     <td className="table-td text-right">
                       <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button className="btn-ghost p-1.5" onClick={()=>{setEditing(s);setOpen(true)}}><Pencil size={13}/></button>
+                        <button className="btn-ghost p-1.5 text-brand-400" onClick={()=>setDrawerSupplier(s)} title="Rohstoffe anzeigen"><FlaskConical size={13}/></button>
+                    <button className="btn-ghost p-1.5" onClick={()=>{setEditing(s);setOpen(true)}}><Pencil size={13}/></button>
                         <button className="btn-ghost p-1.5 text-red-400" onClick={()=>setDeleting(s)}><Trash2 size={13}/></button>
                       </div>
                     </td>
@@ -175,6 +314,7 @@ export default function SuppliersPage() {
       <Modal open={open} onClose={()=>setOpen(false)} title={editing?'Lieferant bearbeiten':'Neuer Lieferant'} subtitle={editing?.name} size="lg">
         <SupplierForm initial={editing} onSubmit={submit} onCancel={()=>setOpen(false)} loading={createM.isPending||updateM.isPending}/>
       </Modal>
+      {drawerSupplier&&createPortal(<SupplierMaterialsDrawer supplier={drawerSupplier} onClose={()=>setDrawerSupplier(null)}/>, document.body)}
       <ConfirmDialog open={!!deleting} title="Lieferant löschen?" message={`"${deleting?.name}" wirklich löschen?`}
         onConfirm={()=>deleting&&deleteM.mutate(deleting.id)} onCancel={()=>setDeleting(undefined)} loading={deleteM.isPending}/>
     </div>
