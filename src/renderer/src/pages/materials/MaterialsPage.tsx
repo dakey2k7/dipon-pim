@@ -376,7 +376,11 @@ export default function MaterialsPage() {
     })
   },[materials,sortBy])
 
-  const inv=()=>qc.invalidateQueries({queryKey:['materials']})
+  const inv=()=>{
+    qc.invalidateQueries({queryKey:['materials']})
+    qc.invalidateQueries({queryKey:['suppliers']})
+    qc.invalidateQueries({queryKey:['supplier-materials']})
+  }
   const createM=useMutation({mutationFn:(d:unknown)=>window.api.materials.create(d),onSuccess:()=>{inv();setOpen(false);toast.success('Rohstoff angelegt')},onError:(e:Error)=>toast.error('Fehler',e.message)})
   const updateM=useMutation({mutationFn:({id,d}:{id:number;d:unknown})=>window.api.materials.update(id,d),onSuccess:()=>{inv();setOpen(false);toast.success('Gespeichert')},onError:(e:Error)=>toast.error('Fehler',e.message)})
   const deleteM=useMutation({mutationFn:(id:number)=>window.api.materials.delete(id),onSuccess:()=>{inv();setDeleting(undefined);toast.success('Gelöscht')}})

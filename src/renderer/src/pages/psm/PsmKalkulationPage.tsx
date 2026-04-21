@@ -1,54 +1,46 @@
 /**
  * PsmKalkulationPage — PrestaShop-Preisstaffel-Kalkulation
- * Ordner · Kalkulations-Tabelle · Ergebnistabelle · Import/Export
+ * Topbar-Layout: Ordner + Kalkulationen ÜBER der Tabelle → maximale Tabellenbreite
  */
 import React, { useState, useMemo, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  FolderOpen, Folder, Plus, Pencil, Trash2, Save, Download, Upload,
-  FileText, Tag, ChevronRight, MoreHorizontal, Star, StarOff,
-  Check, X, RefreshCw, Info,
+  FileText, Plus, Pencil, Trash2, Save, Download, Upload,
+  Tag, Star, StarOff, Check, X, FolderOpen, Folder,
+  ChevronRight,
 } from 'lucide-react'
 import { Button, Input, Select } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog, Spinner } from '@/components/ui/Badge'
 import { useToast } from '@/hooks/useToast'
 
-// ── Typen ────────────────────────────────────────────────────
-interface PsmCalc {
-  id: number; name: string; folder_id: number | null
-  unit_type: string; unit_label: string | null; vat_pct: number
-  tags: string[]; row_count: number; updated_at: string
-}
+// ── Typen ─────────────────────────────────────────────────────
 interface PsmRow {
   id?: number; menge: number; form: string
   preis_brutto: number; preis_netto: number
   is_standard: number; sort_order?: number
-  // calculated
   unit_netto?: number; unit_brutto?: number
   aufschlag_netto?: number; auswirkung_gesamt?: number
 }
 
-const N  = (v: unknown) => { const n = Number(v); return isNaN(n) ? 0 : n }
-const eur = (v: unknown, d = 2) => new Intl.NumberFormat('de-DE', {
-  minimumFractionDigits: d, maximumFractionDigits: d
-}).format(N(v)) + ' €'
+const N = (v: unknown) => { const n = Number(v); return isNaN(n) ? 0 : n }
+const fmt = (v: number, d = 2) =>
+  new Intl.NumberFormat('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d }).format(v)
 
 const UNIT_OPTIONS = [
-  { value:'liter',  label:'Literpreis' },
-  { value:'kg',     label:'Kilogrammpreis' },
-  { value:'stk',    label:'Stückpreis' },
-  { value:'custom', label:'Benutzerdefiniert' },
+  { value:'liter',  label:'Literpreis'         },
+  { value:'kg',     label:'Kilogrammpreis'      },
+  { value:'stk',    label:'Stückpreis'          },
+  { value:'custom', label:'Benutzerdefiniert'   },
 ]
-
 const FOLDER_COLORS = ['#6366f1','#06b6d4','#10b981','#f59e0b','#ef4444','#ec4899','#a78bfa']
 
-// ── Berechnungslogik (Client-seitig für Live-Preview) ─────────
-function calcRows(rows: PsmRow[], unitType: string): PsmRow[] {
+// ── Berechnungslogik ──────────────────────────────────────────
+function calcRows(rows: PsmRow[]): PsmRow[] {
   const std = rows.find(r => r.is_standard) || rows[0]
   if (!std) return rows
-  const std_netto   = N(std.preis_netto) || N(std.preis_brutto) / 1.19
-  const std_unit_n  = std.menge > 0 ? std_netto / std.menge : 0
+  const std_netto  = N(std.preis_netto) || N(std.preis_brutto) / 1.19
+  const std_unit_n = std.menge > 0 ? std_netto / std.menge : 0
 
   return rows.map(r => {
     const netto       = N(r.preis_netto) || N(r.preis_brutto) / 1.19
@@ -56,46 +48,36 @@ function calcRows(rows: PsmRow[], unitType: string): PsmRow[] {
     const unit_brutto = r.menge > 0 ? N(r.preis_brutto) / r.menge : 0
     return {
       ...r,
-      preis_netto:      Math.round(netto * 100) / 100,
-      unit_netto:       Math.round(unit_netto * 100) / 100,
-      unit_brutto:      Math.round(unit_brutto * 100) / 100,
-      aufschlag_netto:  Math.round((unit_netto - std_unit_n) * 10000) / 10000,
-      auswirkung_gesamt:Math.round((netto - std_netto) * 100) / 100,
+      preis_netto:       Math.round(netto * 100) / 100,
+      unit_netto:        Math.round(unit_netto * 100) / 100,
+      unit_brutto:       Math.round(unit_brutto * 100) / 100,
+      aufschlag_netto:   Math.round((unit_netto - std_unit_n) * 10000) / 10000,
+      auswirkung_gesamt: Math.round((netto - std_netto) * 100) / 100,
     }
   })
 }
+const emptyRow = (): PsmRow => ({ menge:1, form:'flüssig', preis_brutto:0, preis_netto:0, is_standard:0 })
 
-// ── Leere Zeile ───────────────────────────────────────────────
-const emptyRow = (): PsmRow => ({
-  menge: 1, form: 'flüssig', preis_brutto: 0, preis_netto: 0, is_standard: 0,
-})
-
-// ── Eingabe-Tabelle ───────────────────────────────────────────
+// ── Eingabetabelle ────────────────────────────────────────────
 function InputTable({ rows, unitType, unitLabel, vatPct, onChange }: {
   rows: PsmRow[]; unitType: string; unitLabel: string
   vatPct: number; onChange: (rows: PsmRow[]) => void
 }) {
-  const calc = useMemo(() => calcRows(rows, unitType), [rows, unitType])
+  const calc = useMemo(() => calcRows(rows), [rows])
   const unitHead = unitType === 'custom' ? unitLabel : UNIT_OPTIONS.find(o => o.value === unitType)?.label || 'Einheitspreis'
 
   const update = useCallback((idx: number, field: keyof PsmRow, value: any) => {
     onChange(rows.map((r, i) => {
       if (i !== idx) return r
       const updated = { ...r, [field]: value }
-      // Auto-berechne Netto aus Brutto wenn Netto leer
-      if (field === 'preis_brutto' && !r.preis_netto) {
+      if (field === 'preis_brutto' && !r.preis_netto)
         updated.preis_netto = Math.round(N(value) / (1 + vatPct/100) * 100) / 100
-      }
       return updated
     }))
   }, [rows, onChange, vatPct])
 
-  const setStandard = (idx: number) => {
+  const setStandard = (idx: number) =>
     onChange(rows.map((r, i) => ({ ...r, is_standard: i === idx ? 1 : 0 })))
-  }
-
-  const addRow = () => onChange([...rows, emptyRow()])
-  const delRow = (idx: number) => onChange(rows.filter((_, i) => i !== idx))
 
   return (
     <div className="glass-card overflow-hidden">
@@ -103,106 +85,79 @@ function InputTable({ rows, unitType, unitLabel, vatPct, onChange }: {
         <table className="w-full text-xs">
           <thead>
             <tr style={{ background:'rgba(255,255,255,0.04)', borderBottom:'2px solid rgba(255,255,255,0.1)' }}>
-              <th className="px-2 py-2.5 text-left text-slate-500 font-bold uppercase tracking-wider w-8">Std</th>
-              <th className="px-2 py-2.5 text-left text-slate-400 font-bold uppercase tracking-wider">Menge</th>
-              <th className="px-2 py-2.5 text-left text-slate-400 font-bold uppercase tracking-wider">Form</th>
-              <th className="px-2 py-2.5 text-right text-slate-400 font-bold uppercase tracking-wider">Preis Brutto</th>
-              <th className="px-2 py-2.5 text-right text-slate-400 font-bold uppercase tracking-wider">Preis Netto</th>
-              <th className="px-2 py-2.5 text-right text-indigo-400 font-bold uppercase tracking-wider whitespace-nowrap">{unitHead} Brutto</th>
-              <th className="px-2 py-2.5 text-right text-indigo-400 font-bold uppercase tracking-wider whitespace-nowrap">{unitHead} Netto</th>
-              <th className="px-2 py-2.5 text-right text-amber-400 font-bold uppercase tracking-wider whitespace-nowrap">Aufschlag Netto</th>
-              <th className="px-2 py-2.5 text-right text-emerald-400 font-bold uppercase tracking-wider whitespace-nowrap">Auswirkung</th>
+              <th className="px-2 py-2.5 text-left text-slate-500 font-bold uppercase tracking-wider w-8">STD</th>
+              <th className="px-2 py-2.5 text-left text-slate-400 font-bold uppercase tracking-wider">MENGE</th>
+              <th className="px-2 py-2.5 text-left text-slate-400 font-bold uppercase tracking-wider">FORM</th>
+              <th className="px-2 py-2.5 text-right text-slate-400 font-bold uppercase tracking-wider">PREIS BRUTTO</th>
+              <th className="px-2 py-2.5 text-right text-slate-400 font-bold uppercase tracking-wider">PREIS NETTO</th>
+              <th className="px-2 py-2.5 text-right text-indigo-400 font-bold uppercase tracking-wider whitespace-nowrap">{unitHead} BRUTTO</th>
+              <th className="px-2 py-2.5 text-right text-indigo-400 font-bold uppercase tracking-wider whitespace-nowrap">{unitHead} NETTO</th>
+              <th className="px-2 py-2.5 text-right text-amber-400 font-bold uppercase tracking-wider whitespace-nowrap">AUFSCHLAG NETTO</th>
+              <th className="px-2 py-2.5 text-right text-emerald-400 font-bold uppercase tracking-wider whitespace-nowrap">AUSWIRKUNG</th>
               <th className="w-8"/>
             </tr>
           </thead>
           <tbody>
             {calc.map((row, idx) => (
-              <tr key={idx}
-                className="group"
-                style={{
-                  borderBottom:'1px solid rgba(255,255,255,0.04)',
-                  background: row.is_standard ? 'rgba(99,102,241,0.06)' : 'transparent',
-                }}>
-                {/* Standard-Radio */}
+              <tr key={idx} className="group"
+                style={{ borderBottom:'1px solid rgba(255,255,255,0.04)', background:row.is_standard?'rgba(99,102,241,0.06)':'transparent' }}>
                 <td className="px-2 py-1.5 text-center">
-                  <button onClick={() => setStandard(idx)}
-                    className="transition-colors"
-                    title="Als Standardvariante setzen">
+                  <button onClick={() => setStandard(idx)} title="Als Referenz setzen">
                     {row.is_standard
                       ? <Star size={13} className="text-amber-400 fill-amber-400"/>
                       : <StarOff size={13} className="text-slate-600 hover:text-amber-400"/>}
                   </button>
                 </td>
-                {/* Menge */}
                 <td className="px-1 py-1">
-                  <input type="number" step="0.01" min="0"
-                    value={row.menge || ''}
-                    onChange={e => update(idx, 'menge', N(e.target.value))}
+                  <input type="number" step="0.01" min="0" value={row.menge||''}
+                    onChange={e => update(idx,'menge',N(e.target.value))}
                     className="form-input text-xs w-20 font-mono text-white"/>
                 </td>
-                {/* Form */}
                 <td className="px-1 py-1">
-                  <input type="text"
-                    value={row.form}
-                    onChange={e => update(idx, 'form', e.target.value)}
-                    className="form-input text-xs w-24 text-white"
-                    placeholder="flüssig"/>
+                  <input type="text" value={row.form}
+                    onChange={e => update(idx,'form',e.target.value)}
+                    className="form-input text-xs w-24 text-white" placeholder="flüssig"/>
                 </td>
-                {/* Preis Brutto */}
                 <td className="px-1 py-1">
                   <div className="flex items-center gap-0.5 justify-end">
-                    <input type="number" step="0.01" min="0"
-                      value={row.preis_brutto || ''}
+                    <input type="number" step="0.01" min="0" value={row.preis_brutto||''}
                       onChange={e => {
-                        const brutto = N(e.target.value)
-                        const netto  = Math.round(brutto / (1 + vatPct/100) * 100) / 100
-                        onChange(rows.map((r,i) => i===idx ? {...r, preis_brutto:brutto, preis_netto:netto} : r))
+                        const b = N(e.target.value)
+                        onChange(rows.map((r,i) => i===idx?{...r,preis_brutto:b,preis_netto:Math.round(b/(1+vatPct/100)*100)/100}:r))
                       }}
                       className="form-input text-xs w-24 font-mono text-white text-right"/>
                     <span className="text-slate-600 text-xs shrink-0">€</span>
                   </div>
                 </td>
-                {/* Preis Netto */}
                 <td className="px-1 py-1">
                   <div className="flex items-center gap-0.5 justify-end">
-                    <input type="number" step="0.01" min="0"
-                      value={row.preis_netto || ''}
+                    <input type="number" step="0.01" min="0" value={row.preis_netto||''}
                       onChange={e => {
-                        const netto  = N(e.target.value)
-                        const brutto = Math.round(netto * (1 + vatPct/100) * 100) / 100
-                        onChange(rows.map((r,i) => i===idx ? {...r, preis_netto:netto, preis_brutto:brutto} : r))
+                        const n = N(e.target.value)
+                        onChange(rows.map((r,i) => i===idx?{...r,preis_netto:n,preis_brutto:Math.round(n*(1+vatPct/100)*100)/100}:r))
                       }}
                       className="form-input text-xs w-24 font-mono text-white text-right"/>
                     <span className="text-slate-600 text-xs shrink-0">€</span>
                   </div>
                 </td>
-                {/* Unit Brutto (calculated) */}
                 <td className="px-2 py-1.5 text-right font-mono text-indigo-300 text-xs whitespace-nowrap">
-                  {N(row.unit_brutto) > 0 ? eur(row.unit_brutto) : '–'}
+                  {N(row.unit_brutto)>0?fmt(row.unit_brutto!)+' €':'–'}
                 </td>
-                {/* Unit Netto (calculated) */}
                 <td className="px-2 py-1.5 text-right font-mono text-indigo-300 text-xs whitespace-nowrap">
-                  {N(row.unit_netto) > 0 ? eur(row.unit_netto) : '–'}
+                  {N(row.unit_netto)>0?fmt(row.unit_netto!)+' €':'–'}
                 </td>
-                {/* Aufschlag Netto */}
                 <td className="px-2 py-1.5 text-right font-mono text-xs whitespace-nowrap"
-                  style={{ color: N(row.aufschlag_netto) < 0 ? '#4ade80' : N(row.aufschlag_netto) > 0 ? '#f87171' : '#64748b' }}>
-                  {row.is_standard
-                    ? <span className="text-slate-600">Referenz</span>
-                    : (N(row.aufschlag_netto) >= 0 ? '+' : '') + N(row.aufschlag_netto).toFixed(2).replace('.',',') + ' €'
-                  }
+                  style={{ color:N(row.aufschlag_netto)<0?'#4ade80':N(row.aufschlag_netto)>0?'#f87171':'#64748b' }}>
+                  {row.is_standard?<span className="text-slate-600">Referenz</span>
+                    :(N(row.aufschlag_netto)>=0?'+':'')+fmt(row.aufschlag_netto!,2)+' €'}
                 </td>
-                {/* Auswirkung */}
                 <td className="px-2 py-1.5 text-right font-mono text-xs whitespace-nowrap"
-                  style={{ color: N(row.auswirkung_gesamt) >= 0 ? '#4ade80' : '#f87171' }}>
-                  {row.is_standard
-                    ? <span className="text-slate-600">—</span>
-                    : (N(row.auswirkung_gesamt) >= 0 ? '+' : '') + eur(row.auswirkung_gesamt)
-                  }
+                  style={{ color:N(row.auswirkung_gesamt)>=0?'#4ade80':'#f87171' }}>
+                  {row.is_standard?<span className="text-slate-600">—</span>
+                    :(N(row.auswirkung_gesamt)>=0?'+':'')+fmt(row.auswirkung_gesamt!)+' €'}
                 </td>
-                {/* Löschen */}
                 <td className="px-1">
-                  <button onClick={() => delRow(idx)}
+                  <button onClick={() => onChange(rows.filter((_,i)=>i!==idx))}
                     className="btn-ghost p-1 text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">
                     <Trash2 size={11}/>
                   </button>
@@ -212,7 +167,7 @@ function InputTable({ rows, unitType, unitLabel, vatPct, onChange }: {
           </tbody>
         </table>
       </div>
-      <button onClick={addRow}
+      <button onClick={() => onChange([...rows, emptyRow()])}
         className="w-full flex items-center justify-center gap-1 py-2 text-xs text-slate-600 hover:text-slate-400 transition-colors"
         style={{ borderTop:'1px dashed rgba(255,255,255,0.08)' }}>
         <Plus size={11}/> Zeile hinzufügen
@@ -222,64 +177,49 @@ function InputTable({ rows, unitType, unitLabel, vatPct, onChange }: {
 }
 
 // ── Ergebnistabelle ───────────────────────────────────────────
-function ResultTable({ rows, unitType, unitLabel }: {
-  rows: PsmRow[]; unitType: string; unitLabel: string
-}) {
-  const calc = useMemo(() => calcRows(rows, unitType), [rows, unitType])
-  const std  = calc.find(r => r.is_standard) || calc[0]
-  const unitHead = unitType === 'custom' ? unitLabel : UNIT_OPTIONS.find(o => o.value === unitType)?.label || 'Einheitspreis'
-
+function ResultTable({ rows, unitType, unitLabel }: { rows:PsmRow[]; unitType:string; unitLabel:string }) {
+  const calc = useMemo(() => calcRows(rows), [rows])
+  const std  = calc.find(r=>r.is_standard)||calc[0]
+  const unitHead = unitType==='custom'?unitLabel:UNIT_OPTIONS.find(o=>o.value===unitType)?.label||'Einheitspreis'
   if (!calc.length) return null
-
   return (
     <div className="glass-card overflow-hidden mt-4">
-      <div className="px-4 py-3 flex items-center gap-2"
+      <div className="px-4 py-3 flex items-center gap-3"
         style={{ borderBottom:'1px solid rgba(255,255,255,0.08)' }}>
-        <Info size={14} className="text-indigo-400 shrink-0"/>
+        <FileText size={14} className="text-indigo-400 shrink-0"/>
         <p className="text-sm font-bold text-white">Ergebnistabelle — PrestaShop Staffelpreise</p>
-        {std && (
-          <span className="text-xs text-slate-500 ml-2">
-            Referenz: <span className="text-amber-400 font-mono">{std.menge} — {eur(std.preis_brutto)} Brutto</span>
-          </span>
-        )}
+        {std && <span className="text-xs text-slate-500 ml-2">Referenz: <span className="text-amber-400 font-mono">{std.menge} — {fmt(std.preis_brutto)} € Brutto</span></span>}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
             <tr style={{ background:'rgba(255,255,255,0.03)', borderBottom:'1px solid rgba(255,255,255,0.08)' }}>
-              <th className="px-3 py-2 text-left text-slate-500 font-bold uppercase tracking-wider">Menge</th>
-              <th className="px-3 py-2 text-left text-slate-500 font-bold uppercase tracking-wider">Form</th>
-              <th className="px-3 py-2 text-right text-white font-bold uppercase tracking-wider">Preis Brutto</th>
-              <th className="px-3 py-2 text-right text-white font-bold uppercase tracking-wider">Preis Netto</th>
-              <th className="px-3 py-2 text-right text-indigo-400 font-bold uppercase tracking-wider whitespace-nowrap">{unitHead} Netto</th>
-              <th className="px-3 py-2 text-right text-amber-400 font-bold uppercase tracking-wider whitespace-nowrap">Aufschlag Netto</th>
-              <th className="px-3 py-2 text-right text-emerald-400 font-bold uppercase tracking-wider whitespace-nowrap">Auswirkung (Gesamt)</th>
+              <th className="px-3 py-2 text-left text-slate-500 font-bold uppercase tracking-wider">MENGE</th>
+              <th className="px-3 py-2 text-left text-slate-500 font-bold uppercase tracking-wider">FORM</th>
+              <th className="px-3 py-2 text-right text-white font-bold uppercase tracking-wider">PREIS BRUTTO</th>
+              <th className="px-3 py-2 text-right text-white font-bold uppercase tracking-wider">PREIS NETTO</th>
+              <th className="px-3 py-2 text-right text-indigo-400 font-bold uppercase tracking-wider whitespace-nowrap">{unitHead} NETTO</th>
+              <th className="px-3 py-2 text-right text-amber-400 font-bold uppercase tracking-wider whitespace-nowrap">AUFSCHLAG NETTO</th>
+              <th className="px-3 py-2 text-right text-emerald-400 font-bold uppercase tracking-wider whitespace-nowrap">AUSWIRKUNG (GESAMT)</th>
             </tr>
           </thead>
           <tbody>
-            {calc.map((row, idx) => (
-              <tr key={idx}
-                style={{
-                  borderBottom:'1px solid rgba(255,255,255,0.04)',
-                  background: row.is_standard ? 'rgba(251,191,36,0.06)' : 'transparent',
-                }}>
+            {calc.map((row,idx)=>(
+              <tr key={idx} style={{ borderBottom:'1px solid rgba(255,255,255,0.04)', background:row.is_standard?'rgba(251,191,36,0.06)':'transparent' }}>
                 <td className="px-3 py-2.5 font-bold text-white font-mono">
-                  {row.menge}
-                  {row.is_standard && (
-                    <span className="ml-2 text-[10px] text-amber-400 font-sans">⭐ Standard</span>
-                  )}
+                  {row.menge}{row.is_standard&&<span className="ml-2 text-[10px] text-amber-400 font-sans">⭐ Standard</span>}
                 </td>
                 <td className="px-3 py-2.5 text-slate-400">{row.form}</td>
-                <td className="px-3 py-2.5 text-right font-mono font-bold text-white">{eur(row.preis_brutto)}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-slate-300">{eur(row.preis_netto)}</td>
-                <td className="px-3 py-2.5 text-right font-mono text-indigo-300">{eur(row.unit_netto)}</td>
+                <td className="px-3 py-2.5 text-right font-mono font-bold text-white">{fmt(row.preis_brutto)} €</td>
+                <td className="px-3 py-2.5 text-right font-mono text-slate-300">{fmt(row.preis_netto)} €</td>
+                <td className="px-3 py-2.5 text-right font-mono text-indigo-300">{fmt(row.unit_netto!)} €</td>
                 <td className="px-3 py-2.5 text-right font-mono font-bold whitespace-nowrap"
-                  style={{ color: row.is_standard ? '#64748b' : N(row.aufschlag_netto) <= 0 ? '#4ade80' : '#f87171' }}>
-                  {row.is_standard ? '0,00 €' : (N(row.aufschlag_netto) >= 0 ? '+' : '') + N(row.aufschlag_netto).toFixed(2).replace('.',',') + ' €'}
+                  style={{ color:row.is_standard?'#64748b':N(row.aufschlag_netto)<=0?'#4ade80':'#f87171' }}>
+                  {row.is_standard?'0,00 €':(N(row.aufschlag_netto)>=0?'+':'')+fmt(row.aufschlag_netto!,2)+' €'}
                 </td>
                 <td className="px-3 py-2.5 text-right font-mono font-bold whitespace-nowrap"
-                  style={{ color: row.is_standard ? '#64748b' : N(row.auswirkung_gesamt) >= 0 ? '#4ade80' : '#f87171' }}>
-                  {row.is_standard ? '—' : (N(row.auswirkung_gesamt) >= 0 ? '+' : '') + eur(row.auswirkung_gesamt)}
+                  style={{ color:row.is_standard?'#64748b':N(row.auswirkung_gesamt)>=0?'#4ade80':'#f87171' }}>
+                  {row.is_standard?'—':(N(row.auswirkung_gesamt)>=0?'+':'')+fmt(row.auswirkung_gesamt)+' €'}
                 </td>
               </tr>
             ))}
@@ -290,71 +230,70 @@ function ResultTable({ rows, unitType, unitLabel }: {
   )
 }
 
-// ── Haupt-Seite ───────────────────────────────────────────────
+// ── Hauptseite ────────────────────────────────────────────────
 export default function PsmKalkulationPage() {
   const qc    = useQueryClient()
   const toast = useToast()
 
-  const [selectedFolder, setSelectedFolder]     = useState<number | null | 'all'>('all')
-  const [selectedCalc,   setSelectedCalc]       = useState<number | null>(null)
-  const [showFolderModal,setShowFolderModal]     = useState(false)
-  const [showCalcModal,  setShowCalcModal]       = useState(false)
-  const [editFolder,     setEditFolder]          = useState<any>(null)
-  const [editCalc,       setEditCalc]            = useState<any>(null)
-  const [deletingFolder, setDeletingFolder]      = useState<any>(null)
-  const [deletingCalc,   setDeletingCalc]        = useState<any>(null)
-  const [rows,           setRows]                = useState<PsmRow[]>([])
-  const [dirty,          setDirty]               = useState(false)
-  const [tagInput,       setTagInput]            = useState('')
-  const [folderForm,     setFolderForm]          = useState({ name:'', color: FOLDER_COLORS[0] })
-  const [calcForm,       setCalcForm]            = useState({
+  const [selectedFolder, setSelectedFolder] = useState<number|null|'all'>('all')
+  const [selectedCalc,   setSelectedCalc]   = useState<number|null>(null)
+  const [showFolderModal,setShowFolderModal] = useState(false)
+  const [showCalcModal,  setShowCalcModal]  = useState(false)
+  const [editFolder,     setEditFolder]     = useState<any>(null)
+  const [editCalc,       setEditCalc]       = useState<any>(null)
+  const [deletingFolder, setDeletingFolder] = useState<any>(null)
+  const [deletingCalc,   setDeletingCalc]   = useState<any>(null)
+  const [rows,           setRows]           = useState<PsmRow[]>([])
+  const [dirty,          setDirty]          = useState(false)
+  const [tagInput,       setTagInput]       = useState('')
+  const [saving,         setSaving]         = useState(false)
+  const [folderForm,     setFolderForm]     = useState({ name:'', color:FOLDER_COLORS[0] })
+  const [calcForm,       setCalcForm]       = useState({
     name:'', description:'', unit_type:'liter', unit_label:'', vat_pct:19, tags:[] as string[],
   })
 
-  const { data: folders = [] } = useQuery<any[]>({
-    queryKey: ['psm-folders'],
-    queryFn:  () => window.api.psm.folders.list() as Promise<any[]>,
+  const { data: folders=[] } = useQuery<any[]>({
+    queryKey:['psm-folders'], queryFn:()=>window.api.psm.folders.list() as Promise<any[]>
   })
-  const { data: calcs = [] } = useQuery<any[]>({
-    queryKey: ['psm-calcs', selectedFolder],
-    queryFn:  () => window.api.psm.calcs.list(selectedFolder === 'all' ? undefined : selectedFolder) as Promise<any[]>,
+  const { data: calcs=[] } = useQuery<any[]>({
+    queryKey:['psm-calcs', selectedFolder],
+    queryFn:()=>window.api.psm.calcs.list(selectedFolder==='all'?undefined:selectedFolder) as Promise<any[]>
   })
   const { data: calcDetail } = useQuery<any>({
-    queryKey: ['psm-calc-detail', selectedCalc],
-    queryFn:  () => selectedCalc ? window.api.psm.calcs.get(selectedCalc) : null,
-    enabled: !!selectedCalc,
+    queryKey:['psm-calc-detail', selectedCalc],
+    queryFn:()=>selectedCalc?window.api.psm.calcs.get(selectedCalc):null,
+    enabled:!!selectedCalc
   })
 
-  // Wenn Detail geladen → Rows in lokalen State
-  React.useEffect(() => {
-    if (calcDetail?.rows) { setRows(calcDetail.rows); setDirty(false) }
-  }, [calcDetail?.id])
+  React.useEffect(()=>{
+    if (calcDetail?.rows){setRows(calcDetail.rows);setDirty(false)}
+  },[calcDetail?.id])
 
-  const invFolders = () => qc.invalidateQueries({ queryKey:['psm-folders'] })
-  const invCalcs   = () => qc.invalidateQueries({ queryKey:['psm-calcs', selectedFolder] })
-  const invDetail  = () => qc.invalidateQueries({ queryKey:['psm-calc-detail', selectedCalc] })
+  const invFolders = ()=>qc.invalidateQueries({queryKey:['psm-folders']})
+  const invCalcs   = ()=>qc.invalidateQueries({queryKey:['psm-calcs',selectedFolder]})
+  const invDetail  = ()=>qc.invalidateQueries({queryKey:['psm-calc-detail',selectedCalc]})
 
-  const saveFolder  = useMutation({ mutationFn:(d:any)=>window.api.psm.folders.save(d), onSuccess:()=>{invFolders();setShowFolderModal(false);toast.success('Ordner gespeichert')} })
-  const delFolder   = useMutation({ mutationFn:(id:number)=>window.api.psm.folders.delete(id), onSuccess:()=>{invFolders();setDeletingFolder(null);if(selectedFolder===deletingFolder?.id)setSelectedFolder('all')} })
-  const saveCalc    = useMutation({ mutationFn:(d:any)=>window.api.psm.calcs.save(d), onSuccess:()=>{invCalcs();setShowCalcModal(false);toast.success('Gespeichert')} })
-  const delCalc     = useMutation({ mutationFn:(id:number)=>window.api.psm.calcs.delete(id), onSuccess:()=>{invCalcs();setDeletingCalc(null);setSelectedCalc(null);toast.success('Gelöscht')} })
-  const saveRows    = useMutation({
-    mutationFn: () => window.api.psm.rows.save(selectedCalc!, rows),
-    onSuccess: () => { invDetail(); setDirty(false); toast.success('Gespeichert') },
-    onError: (e:Error) => toast.error('Fehler', e.message),
-  })
+  const saveFolder = useMutation({mutationFn:(d:any)=>window.api.psm.folders.save(d),onSuccess:()=>{invFolders();setShowFolderModal(false);toast.success('Ordner gespeichert')}})
+  const delFolder  = useMutation({mutationFn:(id:number)=>window.api.psm.folders.delete(id),onSuccess:()=>{invFolders();setDeletingFolder(null);if(selectedFolder===deletingFolder?.id)setSelectedFolder('all')}})
+  const saveCalc   = useMutation({mutationFn:(d:any)=>window.api.psm.calcs.save(d),onSuccess:()=>{invCalcs();setShowCalcModal(false);toast.success('Gespeichert')}})
+  const delCalc    = useMutation({mutationFn:(id:number)=>window.api.psm.calcs.delete(id),onSuccess:()=>{invCalcs();setDeletingCalc(null);setSelectedCalc(null);toast.success('Gelöscht')}})
 
-  const handleRowChange = useCallback((newRows: PsmRow[]) => {
-    setRows(newRows); setDirty(true)
-  }, [])
+  const handleRowChange = useCallback((newRows:PsmRow[])=>{setRows(newRows);setDirty(true)},[])
 
-  const unitLabel = calcDetail?.unit_type === 'custom'
-    ? (calcDetail?.unit_label || 'Einheit')
-    : (UNIT_OPTIONS.find(o => o.value === calcDetail?.unit_type)?.label || 'Literpreis')
+  const saveRows = async()=>{
+    setSaving(true)
+    try{await window.api.psm.rows.save(selectedCalc!,rows);invDetail();setDirty(false);toast.success('Gespeichert')}
+    catch(e:any){toast.error('Fehler',e.message)}
+    finally{setSaving(false)}
+  }
+
+  const activeFolder = (folders as any[]).find((f:any)=>f.id===selectedFolder)
+  const unitLabel    = calcDetail?.unit_type==='custom'?(calcDetail?.unit_label||'Einheit'):(UNIT_OPTIONS.find(o=>o.value===calcDetail?.unit_type)?.label||'Literpreis')
 
   return (
     <div>
-      <div className="page-header mb-5">
+      {/* ── Header ─────────────────────────────────────────── */}
+      <div className="page-header mb-4">
         <div>
           <h2 className="page-title flex items-center gap-2">
             <FileText size={20} className="text-brand-400"/>
@@ -363,12 +302,12 @@ export default function PsmKalkulationPage() {
           <p className="page-subtitle">PrestaShop Preisstaffel-Modell · Aufschläge · Ergebnistabelle</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={async () => { const r = await window.api.psm.import(); if(r?.ok){invCalcs();invFolders();toast.success('Importiert')} }}
+          <button onClick={async()=>{const r=await window.api.psm.import();if(r?.ok){invCalcs();invFolders();toast.success('Importiert')}}}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs text-slate-300 hover:text-white border border-white/10 transition-colors">
             <Upload size={12}/> Import
           </button>
-          {selectedCalc && (
-            <button onClick={() => window.api.psm.export(selectedCalc)}
+          {selectedCalc&&(
+            <button onClick={()=>window.api.psm.export(selectedCalc)}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs text-slate-300 hover:text-white border border-white/10 transition-colors">
               <Download size={12}/> Export
             </button>
@@ -376,138 +315,154 @@ export default function PsmKalkulationPage() {
         </div>
       </div>
 
-      <div className="flex gap-4">
-        {/* Linke Spalte — Ordner + Kalk.-Liste */}
-        <div className="w-64 shrink-0 space-y-2">
-          {/* Ordner-Header */}
-          <div className="flex items-center justify-between mb-1">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-600">Ordner</p>
-            <button onClick={() => { setEditFolder(null); setFolderForm({name:'',color:FOLDER_COLORS[0]}); setShowFolderModal(true) }}
-              className="btn-ghost p-1 text-slate-500 hover:text-white"><Plus size={12}/></button>
-          </div>
+      {/* ── Topbar: Ordner + Kalkulationen ─────────────────── */}
+      <div className="glass-card p-3 mb-4">
+        <div className="flex items-center gap-2 flex-wrap">
 
-          {/* "Alle" Ordner */}
-          <button onClick={() => setSelectedFolder('all')}
-            className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${selectedFolder==='all'?'bg-white/8 text-white':'text-slate-400 hover:text-slate-200'}`}>
-            <FolderOpen size={13} className="text-slate-500"/> Alle Kalkulationen
-            <span className="ml-auto text-slate-600">{calcs.length}</span>
-          </button>
+          {/* Ordner-Tabs */}
+          <div className="flex items-center gap-1 flex-wrap">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 mr-1">ORDNER</span>
 
-          {(folders as any[]).map((f: any) => (
-            <div key={f.id} className="group">
-              <button onClick={() => setSelectedFolder(f.id)}
-                className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${selectedFolder===f.id?'bg-white/8 text-white':'text-slate-400 hover:text-slate-200'}`}>
-                <Folder size={13} style={{ color: f.color }}/>
-                <span className="flex-1 text-left truncate">{f.name}</span>
-                <span className="text-slate-600 shrink-0">{f.calc_count}</span>
-                <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                  <button onClick={e=>{e.stopPropagation();setEditFolder(f);setFolderForm({name:f.name,color:f.color});setShowFolderModal(true)}}
-                    className="p-0.5 text-slate-500 hover:text-white"><Pencil size={10}/></button>
-                  <button onClick={e=>{e.stopPropagation();setDeletingFolder(f)}}
-                    className="p-0.5 text-red-400"><Trash2 size={10}/></button>
-                </div>
-              </button>
-            </div>
-          ))}
+            {/* "Alle" Tab */}
+            <button onClick={()=>setSelectedFolder('all')}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all"
+              style={selectedFolder==='all'
+                ?{background:'rgba(99,102,241,0.2)',border:'1px solid rgba(99,102,241,0.4)',color:'#a5b4fc'}
+                :{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.08)',color:'#64748b'}}>
+              <FolderOpen size={11}/> Alle
+              <span className="ml-1 text-[10px] opacity-60">{calcs.length}</span>
+            </button>
 
-          <div style={{ borderTop:'1px solid rgba(255,255,255,0.06)', paddingTop:8, marginTop:8 }}>
-            <div className="flex items-center justify-between mb-1">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-600">Kalkulationen</p>
-              <button onClick={() => { setEditCalc(null); setCalcForm({name:'',description:'',unit_type:'liter',unit_label:'',vat_pct:19,tags:[]}); setShowCalcModal(true) }}
-                className="btn-ghost p-1 text-slate-500 hover:text-white"><Plus size={12}/></button>
-            </div>
-
-            {!(calcs as any[]).length && (
-              <p className="text-xs text-slate-600 italic px-1 py-2">Noch keine Kalkulationen</p>
-            )}
-
-            {(calcs as any[]).map((c: any) => (
-              <div key={c.id}
-                onClick={() => setSelectedCalc(c.id)}
-                className={`p-2.5 rounded-xl cursor-pointer transition-all mb-1 group ${selectedCalc===c.id?'bg-brand-500/15 border border-brand-500/30':' hover:bg-white/3 border border-transparent'}`}>
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-semibold text-white truncate">{c.name}</p>
-                  <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                    <button onClick={e=>{e.stopPropagation();setEditCalc(c);setCalcForm({name:c.name,description:c.description||'',unit_type:c.unit_type,unit_label:c.unit_label||'',vat_pct:c.vat_pct,tags:c.tags||[]});setShowCalcModal(true)}}
-                      className="p-0.5 text-slate-500 hover:text-white"><Pencil size={10}/></button>
-                    <button onClick={e=>{e.stopPropagation();setDeletingCalc(c)}}
-                      className="p-0.5 text-red-400"><Trash2 size={10}/></button>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <span className="text-[10px] text-slate-600">{c.row_count} Varianten</span>
-                  {(c.tags||[]).map((t: string) => (
-                    <span key={t} className="text-[9px] px-1.5 py-0.5 rounded-full"
-                      style={{ background:'rgba(99,102,241,0.2)', color:'#a5b4fc' }}>{t}</span>
-                  ))}
+            {(folders as any[]).map((f:any)=>(
+              <div key={f.id} className="group relative">
+                <button onClick={()=>setSelectedFolder(f.id)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                  style={selectedFolder===f.id
+                    ?{background:`${f.color}20`,border:`1px solid ${f.color}50`,color:f.color}
+                    :{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.08)',color:'#64748b'}}>
+                  <Folder size={11} style={{color:f.color}}/>
+                  {f.name}
+                  <span className="ml-1 text-[10px] opacity-60">{f.calc_count}</span>
+                </button>
+                {/* Edit/Delete on hover */}
+                <div className="absolute -top-1 -right-1 hidden group-hover:flex gap-0.5 z-10">
+                  <button onClick={()=>{setEditFolder(f);setFolderForm({name:f.name,color:f.color});setShowFolderModal(true)}}
+                    className="w-4 h-4 rounded flex items-center justify-center" style={{background:'#1e293b',border:'1px solid rgba(255,255,255,0.15)'}}>
+                    <Pencil size={8} className="text-slate-400"/>
+                  </button>
+                  <button onClick={()=>setDeletingFolder(f)}
+                    className="w-4 h-4 rounded flex items-center justify-center" style={{background:'#1e293b',border:'1px solid rgba(255,255,255,0.15)'}}>
+                    <Trash2 size={8} className="text-red-400"/>
+                  </button>
                 </div>
               </div>
             ))}
+
+            <button onClick={()=>{setEditFolder(null);setFolderForm({name:'',color:FOLDER_COLORS[0]});setShowFolderModal(true)}}
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-600 hover:text-white transition-colors"
+              style={{border:'1px dashed rgba(255,255,255,0.12)'}} title="Ordner anlegen">
+              <Plus size={12}/>
+            </button>
           </div>
-        </div>
 
-        {/* Rechts: Editor */}
-        {!selectedCalc ? (
-          <div className="flex-1 glass-card flex flex-col items-center justify-center py-20">
-            <FileText size={48} className="text-slate-700 mb-4"/>
-            <p className="text-slate-400 font-semibold">Kalkulation auswählen oder anlegen</p>
-            <p className="text-slate-600 text-sm mt-1">
-              Für PrestaShop Staffelpreise · Aufschläge · Literpreise
-            </p>
-            <Button className="mt-4" icon={<Plus size={14}/>}
-              onClick={() => { setEditCalc(null); setCalcForm({name:'',description:'',unit_type:'liter',unit_label:'',vat_pct:19,tags:[]}); setShowCalcModal(true) }}>
-              Neue Kalkulation
-            </Button>
-          </div>
-        ) : (
-          <div className="flex-1 min-w-0 space-y-4">
-            {/* Kalk.-Header */}
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-bold text-white">{calcDetail?.name}</h3>
-                <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
-                  <span>{unitLabel}</span>
-                  <span>·</span>
-                  <span>MwSt {calcDetail?.vat_pct}%</span>
-                  {(calcDetail?.tags||[]).length > 0 && <span>·</span>}
-                  {(calcDetail?.tags||[]).map((t: string) => (
-                    <span key={t} className="px-1.5 py-0.5 rounded-full text-[10px]"
-                      style={{ background:'rgba(99,102,241,0.2)', color:'#a5b4fc' }}>{t}</span>
-                  ))}
-                </p>
-              </div>
-              {dirty && (
-                <Button icon={<Save size={13}/>} loading={saveRows.isPending} onClick={() => saveRows.mutate()}>
-                  Änderungen speichern
-                </Button>
-              )}
-            </div>
+          {/* Divider */}
+          <div className="w-px h-6 mx-1" style={{background:'rgba(255,255,255,0.1)'}}/>
 
-            {/* Eingabe-Tabelle */}
-            <InputTable
-              rows={rows}
-              unitType={calcDetail?.unit_type || 'liter'}
-              unitLabel={calcDetail?.unit_label || ''}
-              vatPct={calcDetail?.vat_pct || 19}
-              onChange={handleRowChange}/>
+          {/* Kalkulationen als Pills */}
+          <div className="flex items-center gap-1 flex-wrap flex-1 min-w-0">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 mr-1">KALKULATION</span>
 
-            {/* Ergebnis-Tabelle */}
-            {rows.length > 0 && (
-              <ResultTable
-                rows={rows}
-                unitType={calcDetail?.unit_type || 'liter'}
-                unitLabel={calcDetail?.unit_label || ''}/>
+            {!(calcs as any[]).length&&(
+              <span className="text-xs text-slate-600 italic">Noch keine Kalkulationen</span>
             )}
+
+            {(calcs as any[]).map((c:any)=>(
+              <div key={c.id} className="group relative">
+                <button onClick={()=>setSelectedCalc(c.id)}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all max-w-[180px]"
+                  style={selectedCalc===c.id
+                    ?{background:'rgba(99,102,241,0.2)',border:'1px solid rgba(99,102,241,0.4)',color:'#c7d2fe'}
+                    :{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.08)',color:'#94a3b8'}}>
+                  <FileText size={10} className="shrink-0"/>
+                  <span className="truncate">{c.name}</span>
+                  <span className="text-[10px] opacity-50 shrink-0">{c.row_count}</span>
+                </button>
+                {/* Edit/Delete on hover */}
+                <div className="absolute -top-1 -right-1 hidden group-hover:flex gap-0.5 z-10">
+                  <button onClick={()=>{setEditCalc(c);setCalcForm({name:c.name,description:c.description||'',unit_type:c.unit_type,unit_label:c.unit_label||'',vat_pct:c.vat_pct,tags:Array.isArray(c.tags)?c.tags:[]});setShowCalcModal(true)}}
+                    className="w-4 h-4 rounded flex items-center justify-center" style={{background:'#1e293b',border:'1px solid rgba(255,255,255,0.15)'}}>
+                    <Pencil size={8} className="text-slate-400"/>
+                  </button>
+                  <button onClick={()=>setDeletingCalc(c)}
+                    className="w-4 h-4 rounded flex items-center justify-center" style={{background:'#1e293b',border:'1px solid rgba(255,255,255,0.15)'}}>
+                    <Trash2 size={8} className="text-red-400"/>
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            <button
+              onClick={()=>{setEditCalc(null);setCalcForm({name:'',description:'',unit_type:'liter',unit_label:'',vat_pct:19,tags:[]});setShowCalcModal(true)}}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:text-white transition-colors"
+              style={{border:'1px dashed rgba(255,255,255,0.12)'}}>
+              <Plus size={11}/> Neu
+            </button>
           </div>
-        )}
+
+          {/* Speichern-Button */}
+          {dirty&&(
+            <Button size="sm" loading={saving} icon={<Save size={12}/>} onClick={saveRows}>
+              Änderungen speichern
+            </Button>
+          )}
+        </div>
       </div>
 
-      {/* Ordner Modal */}
+      {/* ── Kalkulations-Editor (volle Breite) ─────────────── */}
+      {!selectedCalc ? (
+        <div className="glass-card flex flex-col items-center justify-center py-20">
+          <FileText size={48} className="text-slate-700 mb-4"/>
+          <p className="text-slate-400 font-semibold">Kalkulation auswählen oder anlegen</p>
+          <p className="text-slate-600 text-sm mt-1">Für PrestaShop Staffelpreise · Aufschläge · Literpreise</p>
+        </div>
+      ) : (
+        <div>
+          {/* Info-Zeile */}
+          <div className="flex items-center gap-3 mb-3 flex-wrap">
+            <h3 className="text-base font-bold text-white">{calcDetail?.name}</h3>
+            <span className="text-xs text-slate-500">{unitLabel}</span>
+            <span className="text-xs text-slate-600">·</span>
+            <span className="text-xs text-slate-500">MwSt {calcDetail?.vat_pct}%</span>
+            {(calcDetail?.tags||[]).map((t:string)=>(
+              <span key={t} className="px-1.5 py-0.5 rounded-full text-[10px]"
+                style={{background:'rgba(99,102,241,0.2)',color:'#a5b4fc'}}>{t}</span>
+            ))}
+          </div>
+
+          {/* Eingabe-Tabelle */}
+          <InputTable
+            rows={rows}
+            unitType={calcDetail?.unit_type||'liter'}
+            unitLabel={calcDetail?.unit_label||''}
+            vatPct={calcDetail?.vat_pct||19}
+            onChange={handleRowChange}/>
+
+          {/* Ergebnis-Tabelle */}
+          {rows.length>0&&(
+            <ResultTable
+              rows={rows}
+              unitType={calcDetail?.unit_type||'liter'}
+              unitLabel={calcDetail?.unit_label||''}/>
+          )}
+        </div>
+      )}
+
+      {/* ── Ordner Modal ────────────────────────────────────── */}
       <Modal open={showFolderModal} onClose={()=>setShowFolderModal(false)}
         title={editFolder?'Ordner bearbeiten':'Neuer Ordner'} size="sm">
         <div className="space-y-3">
           <Input label="Name *" value={folderForm.name} autoFocus
-            onChange={e => setFolderForm(p=>({...p,name:e.target.value}))}/>
+            onChange={e=>setFolderForm(p=>({...p,name:e.target.value}))}/>
           <div>
             <label className="text-xs text-slate-400 mb-2 block font-semibold">Farbe</label>
             <div className="flex gap-2">
@@ -528,13 +483,12 @@ export default function PsmKalkulationPage() {
         </div>
       </Modal>
 
-      {/* Kalkulation Modal */}
+      {/* ── Kalkulation Modal ───────────────────────────────── */}
       <Modal open={showCalcModal} onClose={()=>setShowCalcModal(false)}
         title={editCalc?'Kalkulation bearbeiten':'Neue Kalkulation'} size="md">
         <div className="space-y-4">
           <Input label="Name *" value={calcForm.name} autoFocus
-            onChange={e=>setCalcForm(p=>({...p,name:e.target.value}))}
-            placeholder="z.B. Nitro Verdünnung"/>
+            onChange={e=>setCalcForm(p=>({...p,name:e.target.value}))} placeholder="z.B. Nitro Verdünnung"/>
           <Input label="Beschreibung" value={calcForm.description}
             onChange={e=>setCalcForm(p=>({...p,description:e.target.value}))}/>
           <div className="grid grid-cols-3 gap-3">
@@ -547,7 +501,7 @@ export default function PsmKalkulationPage() {
             <Input label="MwSt %" type="number" value={calcForm.vat_pct}
               onChange={e=>setCalcForm(p=>({...p,vat_pct:Number(e.target.value)}))}/>
           </div>
-          {calcForm.unit_type === 'custom' && (
+          {calcForm.unit_type==='custom'&&(
             <Input label="Benutzerdefinierte Einheit *" value={calcForm.unit_label}
               onChange={e=>setCalcForm(p=>({...p,unit_label:e.target.value}))}
               placeholder="z.B. m², Stk, Paar"/>
@@ -555,16 +509,14 @@ export default function PsmKalkulationPage() {
           {/* Tags */}
           <div>
             <label className="text-xs text-slate-400 mb-2 block font-semibold flex items-center gap-1">
-              <Tag size={11}/> Tags (Produktgruppen)
+              <Tag size={11}/> Tags
             </label>
             <div className="flex flex-wrap gap-1.5 mb-2">
               {calcForm.tags.map((t,i)=>(
                 <span key={i} className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs"
                   style={{background:'rgba(99,102,241,0.2)',color:'#a5b4fc',border:'1px solid rgba(99,102,241,0.3)'}}>
                   {t}
-                  <button onClick={()=>setCalcForm(p=>({...p,tags:p.tags.filter((_,j)=>j!==i)}))}>
-                    <X size={9}/>
-                  </button>
+                  <button onClick={()=>setCalcForm(p=>({...p,tags:p.tags.filter((_,j)=>j!==i)}))}><X size={9}/></button>
                 </span>
               ))}
             </div>
@@ -576,19 +528,10 @@ export default function PsmKalkulationPage() {
                 className="btn-ghost p-2 text-brand-400"><Plus size={13}/></button>
             </div>
           </div>
-          {/* Ordner */}
-          <Select label="Ordner (optional)" value={String(calcForm.unit_type==='liter'?editCalc?.folder_id||'':editCalc?.folder_id||'')}
-            onChange={e=>setEditCalc((p: any)=>({...(p||{}),folder_id:e.target.value?Number(e.target.value):null}))}>
-            <option value="">– Kein Ordner –</option>
-            {(folders as any[]).map((f:any)=><option key={f.id} value={f.id}>{f.name}</option>)}
-          </Select>
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" onClick={()=>setShowCalcModal(false)}>Abbrechen</Button>
             <Button disabled={!calcForm.name} loading={saveCalc.isPending}
-              onClick={()=>saveCalc.mutate({
-                ...(editCalc||{}), ...calcForm,
-                folder_id: editCalc?.folder_id||null,
-              })}>
+              onClick={()=>saveCalc.mutate({...(editCalc||{}),...calcForm,folder_id:editCalc?.folder_id||null})}>
               {editCalc?'Speichern':'Anlegen'}
             </Button>
           </div>
@@ -596,7 +539,7 @@ export default function PsmKalkulationPage() {
       </Modal>
 
       <ConfirmDialog open={!!deletingFolder} title="Ordner löschen?"
-        message={`Ordner "${deletingFolder?.name}" löschen? Kalkulationen bleiben erhalten.`}
+        message={`Ordner "${deletingFolder?.name}" löschen?`}
         onConfirm={()=>deletingFolder&&delFolder.mutate(deletingFolder.id)}
         onCancel={()=>setDeletingFolder(null)} loading={delFolder.isPending}/>
       <ConfirmDialog open={!!deletingCalc} title="Kalkulation löschen?"

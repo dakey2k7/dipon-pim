@@ -123,6 +123,25 @@ export function getDb(): Database.Database {
   try { _db.exec(SCHEMA_PSM_SQL)  } catch (e) { console.error('psm schema:', e) }
   try { _db.exec(SCHEMA_GEO_SQL)     } catch (e) { console.error('geo schema:', e) }
   try { _db.exec(SEED_COUNTRIES_SQL)  } catch {}
+
+  // Migration: VAT-Duplikate bereinigen (behält neuesten Eintrag je Land+Datum)
+  try {
+    _db.exec(`
+      DELETE FROM vat_rates
+      WHERE id NOT IN (
+        SELECT MIN(id) FROM vat_rates
+        GROUP BY country_id, valid_from, vat_standard
+      )
+    `)
+  } catch {}
+
+  // Migration: UNIQUE Index für vat_rates (country_id, valid_from) anlegen
+  try {
+    _db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_vat_rates_unique
+      ON vat_rates (country_id, valid_from)
+    `)
+  } catch {}
   try { _db.exec(SEED_VAT_RATES_SQL)  } catch {}
   try { _db.exec(SCHEMA_SYSTEMS_SQL) } catch (e) { console.error('systems schema:', e) }
   try { _db.exec(SEED_SYSTEM_SIZES)  } catch {}

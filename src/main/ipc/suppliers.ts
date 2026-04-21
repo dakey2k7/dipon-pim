@@ -6,7 +6,12 @@ export function registerSupplierHandlers(): void {
     const db = getDb()
     let sql = `
       SELECT s.*,
-        (SELECT COUNT(*) FROM supplier_prices sp WHERE sp.supplier_id = s.id) AS materials_count
+        (
+          SELECT COUNT(DISTINCT m2.id)
+          FROM materials m2
+          LEFT JOIN supplier_prices sp2 ON sp2.material_id = m2.id AND sp2.supplier_id = s.id
+          WHERE m2.supplier_id = s.id OR (sp2.supplier_id = s.id AND sp2.is_preferred = 1)
+        ) AS materials_count
       FROM suppliers s WHERE 1=1
     `
     const params: unknown[] = []
@@ -148,7 +153,7 @@ ipcMain.handle('suppliers:deleteCondition', (_e, condId: number) => {
           m.deposit_note
         FROM materials m
         LEFT JOIN supplier_prices sp ON sp.material_id = m.id AND sp.supplier_id = ?
-        WHERE m.supplier_id = ? OR sp.supplier_id = ?
+        WHERE m.supplier_id = ? OR (sp.supplier_id = ? AND sp.is_preferred = 1)
         ORDER BY m.product_type ASC, m.name ASC
       `).all(supplierId, supplierId, supplierId)
     } catch (e) {
