@@ -1,217 +1,284 @@
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useState, useEffect, useCallback } from 'react'
+import { useNavigate }     from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Plus, Pencil, Trash2, Search, Package, ChevronRight,
-  FlaskConical, Star, Calculator, Layers, Download, Upload, FileSpreadsheet,
+  Pencil, Trash2, Search, Package, Layers, Plus,
+  FlaskConical, ArrowRight, Save, X,
 } from 'lucide-react'
-import { useToast }    from '@/hooks/useToast'
-import { Button }      from '@/components/ui/Input'
+import { useToast }     from '@/hooks/useToast'
+import { Button }       from '@/components/ui/Input'
 import { Input, Select } from '@/components/ui/Input'
-import { Modal }       from '@/components/ui/Modal'
-import { Spinner, Card, EmptyState, ConfirmDialog, Badge, SkeletonList, SkeletonCard } from '@/components/ui/Badge'
+import { Modal }        from '@/components/ui/Modal'
+import {
+  Spinner, EmptyState, ConfirmDialog, SkeletonList, SkeletonCard,
+} from '@/components/ui/Badge'
 
-// ─── Types ───────────────────────────────────────────────────
-interface ProductGroup {
-  id: number; name: string; code: string; color: string; product_count?: number
-}
+// ── Types ─────────────────────────────────────────────────────
+interface ProductGroup { id: number; name: string; code: string; color: string }
 interface Product {
-  id: number; product_group_id: number | null; name: string; code: string
-  group_name?: string; group_color?: string
+  id: number; name: string; code: string
+  product_group_id: number | null; group_name?: string; group_color?: string
   batch_size: number; batch_unit: string; overhead_factor: number
   material_count?: number; variant_count?: number
 }
-interface ProductMaterial {
-  id: number; material_id: number; material_name: string; material_code: string
-  quantity: number; unit: string; waste_factor: number; sort_order: number
-  pref_price: number | null; pref_currency: string | null; pref_supplier_name: string | null
-  all_prices_json: string | null
-}
-interface SupplierPrice {
-  supplier_id: number; supplier_name: string; price_per_unit: number
-  currency: string; unit: string; is_preferred: number
-}
 interface ProductVariant {
-  id: number; name: string; code: string; fill_quantity: number; fill_unit: string
-  packaging_name?: string; packaging_price?: number
-  label_name?: string; label_price?: number
-  carton_name?: string; carton_price?: number
-  extra_cost: number
+  id: number; name: string; code: string; sku?: string; ean?: string
+  fill_quantity: number; fill_unit: string
+  packaging_name?: string; packaging_price?: number; packaging_item_id?: number | null
+  label_name?: string;    label_price?: number;    label_item_id?: number | null
+  carton_name?: string;   carton_price?: number;   carton_item_id?: number | null
+  units_per_carton: number; extra_cost: number; extra_cost_note?: string
 }
 interface VariantCost {
   total_cost: number; material_cost: number; packaging_cost: number
-  label_cost: number; carton_cost: number; extra_cost: number
-  price_per_kg: number; currency: string
-  material_breakdown: Array<{ material_name: string; cost_in_batch: number; quantity: number; unit: string }>
+  label_cost: number; carton_cost: number; extra_cost: number; price_per_kg: number
 }
 
-const fmt = (v: number, cur = 'EUR') =>
-  new Intl.NumberFormat('de-DE', { style:'currency', currency:cur, minimumFractionDigits:2 }).format(v)
+const fmt = (v: number) =>
+  new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 }).format(v)
 
 const GROUP_COLORS = ['#8b5cf6','#06b6d4','#10b981','#f59e0b','#ef4444','#ec4899']
 
-// ─── Product Group Form ───────────────────────────────────────
-function GroupModal({ group, onSave, onClose }: {
-  group?: ProductGroup; onSave:(d:unknown)=>void; onClose:()=>void
-}) {
-  const [form, setForm] = useState({ name:group?.name??'', code:group?.code??'', color:group?.color??'#8b5cf6' })
+const EMPTY_VARIANT = {
+  name: '', code: '', sku: '', ean: '',
+  fill_quantity: '', fill_unit: 'kg',
+  packaging_item_id: '', label_item_id: '', carton_item_id: '',
+  units_per_carton: 1, extra_cost: 0, extra_cost_note: '',
+}
+
+// ── Kostenanzeige pro Variante ────────────────────────────────
+function VariantCostCard({ variantId }: { variantId: number }) {
+  const { data: cost } = useQuery<VariantCost>({
+    queryKey: ['variant-cost', variantId],
+    queryFn:  () => window.api.products.calcVariantCost(variantId) as Promise<VariantCost>,
+    staleTime: 60_000,
+  })
+  if (!cost) return <span className="text-xs text-slate-600">Berechne …</span>
   return (
-    <Modal open onClose={onClose} title={group?'Gruppe bearbeiten':'Neue Produktgruppe'} size="sm">
-      <div className="space-y-4">
-        <Input label="Name *" value={form.name} autoFocus onChange={e=>setForm(f=>({...f,name:e.target.value}))}/>
-        <Input label="Code *" value={form.code} onChange={e=>setForm(f=>({...f,code:e.target.value.toUpperCase()}))}/>
-        <div>
-          <label className="form-label">Farbe</label>
-          <div className="flex gap-2 mt-1.5">
-            {GROUP_COLORS.map(c=>(
-              <button key={c} onClick={()=>setForm(f=>({...f,color:c}))} type="button"
-                className={`w-7 h-7 rounded-lg transition-all ${form.color===c?'ring-2 ring-white/50 scale-110':'opacity-60 hover:opacity-100'}`}
-                style={{backgroundColor:c}}/>
-            ))}
-          </div>
+    <div className="text-xs space-y-1 mt-2 pt-2 border-t border-white/6">
+      {cost.material_cost > 0 && (
+        <div className="flex justify-between">
+          <span className="text-slate-500">Rohstoff</span>
+          <span className="font-mono text-slate-300">{fmt(cost.material_cost)}</span>
         </div>
+      )}
+      {cost.packaging_cost > 0 && (
+        <div className="flex justify-between">
+          <span className="text-slate-500">Verpackung</span>
+          <span className="font-mono text-slate-300">{fmt(cost.packaging_cost)}</span>
+        </div>
+      )}
+      {cost.label_cost > 0 && (
+        <div className="flex justify-between">
+          <span className="text-slate-500">Etikett</span>
+          <span className="font-mono text-slate-300">{fmt(cost.label_cost)}</span>
+        </div>
+      )}
+      {cost.carton_cost > 0 && (
+        <div className="flex justify-between">
+          <span className="text-slate-500">Karton (ant.)</span>
+          <span className="font-mono text-slate-300">{fmt(cost.carton_cost)}</span>
+        </div>
+      )}
+      <div className="flex justify-between font-semibold pt-1 border-t border-white/6">
+        <span className="text-slate-300">EK gesamt</span>
+        <span className="font-mono text-white">{fmt(cost.total_cost)}</span>
+      </div>
+      {cost.price_per_kg > 0 && (
+        <div className="flex justify-between text-slate-500">
+          <span>€ / kg</span>
+          <span className="font-mono">{cost.price_per_kg.toFixed(4).replace('.', ',')} €</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Varianten-Modal (Anlegen + Bearbeiten) ────────────────────
+function VariantModal({
+  productId, variant, packaging, labels, cartons, onClose, onSaved,
+}: {
+  productId: number; variant?: ProductVariant
+  packaging: any[]; labels: any[]; cartons: any[]
+  onClose: () => void; onSaved: () => void
+}) {
+  const toast = useToast()
+  const [form, setForm] = useState(variant ? {
+    name:             variant.name,
+    sku:              variant.sku  || '',
+    ean:              variant.ean  || '',
+    fill_quantity:    String(variant.fill_quantity),
+    fill_unit:        variant.fill_unit,
+    packaging_item_id: String(variant.packaging_item_id || ''),
+    label_item_id:    String(variant.label_item_id    || ''),
+    carton_item_id:   String(variant.carton_item_id   || ''),
+    units_per_carton: variant.units_per_carton,
+    extra_cost:       variant.extra_cost,
+    extra_cost_note:  variant.extra_cost_note || '',
+  } : { name: '', sku: '', ean: '', fill_quantity: '', fill_unit: 'kg', packaging_item_id: '', label_item_id: '', carton_item_id: '', units_per_carton: 1, extra_cost: 0, extra_cost_note: '' })
+
+  const saveM = useMutation({
+    mutationFn: (d: unknown) => window.api.products.saveVariant(productId, d),
+    onSuccess: () => { onSaved(); onClose(); toast.success(variant ? 'Variante gespeichert' : 'Variante angelegt') },
+    onError: (e: Error) => toast.error('Fehler', e.message),
+  })
+
+  const f = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+    setForm(p => ({ ...p, [k]: e.target.value }))
+
+  return (
+    <Modal open onClose={onClose} title={variant ? 'Variante bearbeiten' : 'Neue Variante'} size="md">
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2">
+            <Input label="Bezeichnung *" value={form.name} autoFocus
+              onChange={e => setForm(p => ({
+                ...p, name: e.target.value,
+                code: variant ? p.code : e.target.value.toUpperCase().replace(/[\s,]/g, '-').slice(0, 16),
+              }))}
+              placeholder="z.B. 0,75 kg Set"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Input label="Füllmenge *" type="number" step="0.001" value={form.fill_quantity}
+              onChange={f('fill_quantity')} placeholder="z.B. 0.75"/>
+            <Select label="Einheit" value={form.fill_unit} onChange={f('fill_unit')}>
+              {['kg','g','l','ml','stk'].map(u => <option key={u}>{u}</option>)}
+            </Select>
+          </div>
+          <Input label="EAN" value={form.ean} onChange={f('ean')} placeholder="Barcode"/>
+          <Input label="SKU" value={form.sku} onChange={f('sku')} placeholder="Artikel-Nr."/>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <Select label="Verpackung" value={form.packaging_item_id} onChange={f('packaging_item_id')}>
+            <option value="">– keine –</option>
+            {packaging.map((p: any) => (
+              <option key={p.id} value={p.id}>{p.name} ({p.price_per_unit || 0} €)</option>
+            ))}
+          </Select>
+          <Select label="Etikett" value={form.label_item_id} onChange={f('label_item_id')}>
+            <option value="">– kein –</option>
+            {labels.map((l: any) => (
+              <option key={l.id} value={l.id}>{l.name} ({l.price_per_unit || 0} €)</option>
+            ))}
+          </Select>
+          <Select label="Karton" value={form.carton_item_id} onChange={f('carton_item_id')}>
+            <option value="">– kein –</option>
+            {cartons.map((c: any) => (
+              <option key={c.id} value={c.id}>{c.name} ({c.price_per_unit || 0} €)</option>
+            ))}
+          </Select>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <Input label="Stk/Karton" type="number" min="1"
+            value={form.units_per_carton}
+            onChange={e => setForm(p => ({ ...p, units_per_carton: Number(e.target.value) }))}/>
+          <Input label="Zusatzkosten €" type="number" step="0.01"
+            value={form.extra_cost}
+            onChange={e => setForm(p => ({ ...p, extra_cost: Number(e.target.value) }))}/>
+          <Input label="Notiz Zusatzkosten" value={form.extra_cost_note} onChange={f('extra_cost_note')}/>
+        </div>
+
         <div className="flex justify-end gap-3 pt-2">
-          <Button variant="secondary" onClick={onClose}>Abbrechen</Button>
-          <Button onClick={()=>onSave({...group,...form})}>{group?'Speichern':'Anlegen'}</Button>
+          <Button variant="secondary" onClick={onClose} icon={<X size={13}/>}>Abbrechen</Button>
+          <Button
+            loading={saveM.isPending}
+            disabled={!form.name || !form.code || !form.fill_quantity}
+            icon={<Save size={13}/>}
+            onClick={() => saveM.mutate({
+              ...(variant ? { id: variant.id } : {}),
+              name:              form.name,
+              code:              `${form.name.toUpperCase().replace(/[\s,]/g,'-').slice(0,16)}-${form.fill_quantity}${form.fill_unit}`.toUpperCase(),
+              sku:               form.sku  || null,
+              ean:               form.ean  || null,
+              fill_quantity:     Number(form.fill_quantity),
+              fill_unit:         form.fill_unit,
+              packaging_item_id: form.packaging_item_id ? Number(form.packaging_item_id) : null,
+              label_item_id:     form.label_item_id     ? Number(form.label_item_id)     : null,
+              carton_item_id:    form.carton_item_id    ? Number(form.carton_item_id)    : null,
+              units_per_carton:  form.units_per_carton,
+              extra_cost:        form.extra_cost,
+              extra_cost_note:   form.extra_cost_note || null,
+            })}
+          >
+            {variant ? 'Speichern' : 'Anlegen'}
+          </Button>
         </div>
       </div>
     </Modal>
   )
 }
 
-// ─── Material Row mit Lieferantenpreisauswahl ─────────────────
-function MaterialRow({ mat, onDelete }: { mat: ProductMaterial; onDelete:(id:number)=>void }) {
-  const [selectedSupplier, setSelectedSupplier] = useState<number|null>(null)
-  let prices: SupplierPrice[] = []
-  try { prices = mat.all_prices_json ? JSON.parse(mat.all_prices_json) : [] } catch {}
-
-  const activePrice = prices.find(p => selectedSupplier
-    ? p.supplier_id === selectedSupplier
-    : p.is_preferred === 1
-  ) ?? prices[0]
-
+// ── Produktgruppen-Modal ───────────────────────────────────────
+function GroupModal({ group, onSave, onClose }: {
+  group?: ProductGroup; onSave: (d: unknown) => void; onClose: () => void
+}) {
+  const [form, setForm] = useState({ name: group?.name ?? '', code: group?.code ?? '', color: group?.color ?? '#8b5cf6' })
   return (
-    <div className="flex items-center gap-3 p-3 rounded-xl bg-white/3 border border-white/5 group">
-      <FlaskConical size={14} className="text-brand-400 shrink-0"/>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-slate-200">{mat.material_name}</p>
-        <p className="text-xs text-slate-500">{mat.quantity} {mat.unit}
-          {mat.waste_factor > 0 && <span className="ml-1 text-amber-500">+{(mat.waste_factor*100).toFixed(0)}% Ausschuss</span>}
-        </p>
-      </div>
-      {/* Lieferanten-Preisauswahl */}
-      <div className="flex items-center gap-2 shrink-0">
-        {prices.length > 1 ? (
-          <select
-            className="form-input text-xs py-1 w-44"
-            value={selectedSupplier ?? (prices.find(p=>p.is_preferred)?.supplier_id ?? prices[0]?.supplier_id ?? '')}
-            onChange={e=>setSelectedSupplier(Number(e.target.value))}
-          >
-            {prices.map(p=>(
-              <option key={p.supplier_id} value={p.supplier_id}>
-                {p.is_preferred?'★ ':''}{p.supplier_name} – {fmt(p.price_per_unit)} /{p.unit}
-              </option>
+    <Modal open onClose={onClose} title={group ? 'Gruppe bearbeiten' : 'Neue Produktgruppe'} size="sm">
+      <div className="space-y-4">
+        <Input label="Name *" value={form.name} autoFocus onChange={e => setForm(f => ({ ...f, name: e.target.value }))}/>
+        <Input label="Code *" value={form.code} onChange={e => setForm(f => ({ ...f, code: e.target.value.toUpperCase() }))}/>
+        <div>
+          <label className="form-label">Farbe</label>
+          <div className="flex gap-2 mt-1.5">
+            {GROUP_COLORS.map(c => (
+              <button key={c} type="button" onClick={() => setForm(f => ({ ...f, color: c }))}
+                className={`w-7 h-7 rounded-lg transition-all ${form.color === c ? 'ring-2 ring-white/50 scale-110' : 'opacity-60 hover:opacity-100'}`}
+                style={{ backgroundColor: c }}/>
             ))}
-          </select>
-        ) : (
-          <span className="text-xs text-slate-400">
-            {activePrice ? `${activePrice.supplier_name}` : 'Kein Preis'}
-          </span>
-        )}
-        {activePrice && (
-          <span className="text-sm font-mono font-semibold text-slate-200">
-            {fmt(activePrice.price_per_unit)}/{activePrice.unit}
-          </span>
-        )}
-        {!activePrice && <span className="text-xs text-red-400">Kein Preis!</span>}
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 pt-2">
+          <Button variant="secondary" onClick={onClose}>Abbrechen</Button>
+          <Button onClick={() => onSave({ ...group, ...form })}>{group ? 'Speichern' : 'Anlegen'}</Button>
+        </div>
       </div>
-      <button onClick={()=>onDelete(mat.id)} className="btn-ghost p-1.5 text-red-400 opacity-0 group-hover:opacity-100">
-        <Trash2 size={12}/>
-      </button>
-    </div>
+    </Modal>
   )
 }
 
-// ─── Variant Cost Card ────────────────────────────────────────
-function VariantCostCard({ variantId }: { variantId: number }) {
-  const { data: cost } = useQuery<VariantCost>({
-    queryKey: ['variant-cost', variantId],
-    queryFn:  () => window.api.products.calcVariantCost(variantId) as Promise<VariantCost>,
-    staleTime: 30_000,
-  })
-  if (!cost) return <div className="text-xs text-slate-600 italic">Berechne …</div>
-  return (
-    <div className="text-xs space-y-1">
-      <div className="flex justify-between">
-        <span className="text-slate-500">Rohstoff</span>
-        <span className="text-slate-300 font-mono">{fmt(cost.material_cost)}</span>
-      </div>
-      {cost.packaging_cost > 0 && (
-        <div className="flex justify-between">
-          <span className="text-slate-500">Verpackung</span>
-          <span className="text-slate-300 font-mono">{fmt(cost.packaging_cost)}</span>
-        </div>
-      )}
-      {cost.label_cost > 0 && (
-        <div className="flex justify-between">
-          <span className="text-slate-500">Etikett</span>
-          <span className="text-slate-300 font-mono">{fmt(cost.label_cost)}</span>
-        </div>
-      )}
-      {cost.carton_cost > 0 && (
-        <div className="flex justify-between">
-          <span className="text-slate-500">Karton (ant.)</span>
-          <span className="text-slate-300 font-mono">{fmt(cost.carton_cost)}</span>
-        </div>
-      )}
-      <div className="flex justify-between pt-1 border-t border-white/5 font-semibold">
-        <span className="text-slate-300">Gesamt EK</span>
-        <span className="text-white font-mono">{fmt(cost.total_cost)}</span>
-      </div>
-      <div className="flex justify-between text-slate-500">
-        <span>Preis/kg</span>
-        <span className="font-mono">{fmt(cost.price_per_kg)}/kg</span>
-      </div>
-    </div>
-  )
-}
-
-// ─── Main Page ────────────────────────────────────────────────
+// ── Hauptseite ─────────────────────────────────────────────────
 export default function ProductsPage() {
-  const nav = useNavigate()
+  const nav   = useNavigate()
   const qc    = useQueryClient()
   const toast = useToast()
 
-  const [tab, setTab] = useState<'products'|'2k'>('products')
-  const [show2kModal, setShow2kModal] = useState(false)
-  const [search, setSearch]           = useState('')
-  const [filterGroup, setFilterGroup] = useState<number|null>(null)
-  const [selectedProduct, setSelectedProduct] = useState<number|null>(null)
-  const [showGroupModal, setShowGroupModal]   = useState(false)
-  const [editingGroup, setEditingGroup]       = useState<ProductGroup|undefined>()
-  const [showProductModal, setShowProductModal] = useState(false)
-  const [editingProduct, setEditingProduct]     = useState<Product|undefined>()
-  const [showMatModal, setShowMatModal]         = useState(false)
-  const [deletingProduct, setDeletingProduct]   = useState<Product|undefined>()
-  const [newMatForm, setNewMatForm]             = useState({ material_id:'', quantity:'', unit:'g', waste_factor:'0' })
+  const [search,         setSearch]         = useState('')
+  const [filterGroup,    setFilterGroup]    = useState<number | null>(null)
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300)
+    return () => clearTimeout(t)
+  }, [search])
+  const [selectedProduct,setSelectedProduct]= useState<number | null>(null)
+  const [showGroupModal, setShowGroupModal] = useState(false)
+  const [editingGroup,   setEditingGroup]   = useState<ProductGroup | undefined>()
+  const [showVariantModal,  setShowVariantModal]   = useState(false)
+  const [editingVariant,    setEditingVariant]     = useState<ProductVariant | undefined>()
+  const [deletingProduct,   setDeletingProduct]    = useState<Product | undefined>()
+  const [deletingVariant,   setDeletingVariant]    = useState<ProductVariant | undefined>()
+  const [showGenerator,     setShowGenerator]     = useState(false)
+  const [showCopyModal,     setShowCopyModal]     = useState(false)
 
-  const { data: groups=[] } = useQuery<ProductGroup[]>({
+  const { data: groups = [] } = useQuery<ProductGroup[]>({
     queryKey: ['product-groups'],
-    queryFn: () => window.api.productGroups.list() as Promise<ProductGroup[]>,
+    queryFn:  () => window.api.productGroups.list() as Promise<ProductGroup[]>,
   })
-  const { data: products=[], isLoading } = useQuery<Product[]>({
-    queryKey: ['products', search, filterGroup],
-    queryFn:  () => window.api.products.list({ search:search||undefined, group_id:filterGroup||undefined }) as Promise<Product[]>,
+  const { data: products = [], isLoading } = useQuery<Product[]>({
+    queryKey: ['products', debouncedSearch, filterGroup],
+    queryFn:  () => window.api.products.list({ search: debouncedSearch || undefined, group_id: filterGroup || undefined }) as Promise<Product[]>,
   })
   const { data: productDetail } = useQuery({
     queryKey: ['product-detail', selectedProduct],
     queryFn:  () => selectedProduct ? window.api.products.get(selectedProduct) : null,
-    enabled: !!selectedProduct,
+    enabled:  !!selectedProduct,
   })
-  const { data: allMaterials=[] } = useQuery({
-    queryKey: ['materials'],
-    queryFn:  () => window.api.materials.list() as Promise<unknown[]>,
-  })
+  const { data: packaging = [] } = useQuery<any[]>({ queryKey: ['packaging'], queryFn: () => window.api.packaging.list() as Promise<any[]> })
+  const { data: labels    = [] } = useQuery<any[]>({ queryKey: ['labels'],    queryFn: () => window.api.labels.list()    as Promise<any[]> })
+  const { data: cartons   = [] } = useQuery<any[]>({ queryKey: ['cartons'],   queryFn: () => window.api.cartons.list()   as Promise<any[]> })
 
   const invGroups   = () => qc.invalidateQueries({ queryKey: ['product-groups'] })
   const invProducts = () => {
@@ -219,30 +286,27 @@ export default function ProductsPage() {
     qc.invalidateQueries({ queryKey: ['product-detail', selectedProduct] })
   }
 
-  const createGroup  = useMutation({ mutationFn:(d:unknown)=>window.api.productGroups.create(d), onSuccess:()=>{invGroups();setShowGroupModal(false);toast.success('Gruppe angelegt')}, onError:(e:Error)=>toast.error('Fehler',e.message) })
-  const updateGroup  = useMutation({ mutationFn:({id,d}:{id:number;d:unknown})=>window.api.productGroups.update(id,d), onSuccess:()=>{invGroups();setShowGroupModal(false);toast.success('Gespeichert')}, onError:(e:Error)=>toast.error('Fehler',e.message) })
-  const createProd   = useMutation({ mutationFn:(d:unknown)=>window.api.products.create(d), onSuccess:()=>{invProducts();setShowProductModal(false);toast.success('Produkt angelegt')}, onError:(e:Error)=>toast.error('Fehler',e.message) })
-  const updateProd   = useMutation({ mutationFn:({id,d}:{id:number;d:unknown})=>window.api.products.update(id,d), onSuccess:()=>{invProducts();setShowProductModal(false);toast.success('Gespeichert')}, onError:(e:Error)=>toast.error('Fehler',e.message) })
-  const deleteProd   = useMutation({ mutationFn:(id:number)=>window.api.products.delete(id), onSuccess:()=>{invProducts();setDeletingProduct(undefined);setSelectedProduct(null);toast.success('Gelöscht')} })
-  const saveMat      = useMutation({ mutationFn:({d}:{d:unknown})=>window.api.products.saveMaterial(selectedProduct!,d), onSuccess:()=>{invProducts();setShowMatModal(false);toast.success('Rohstoff hinzugefügt')}, onError:(e:Error)=>toast.error('Fehler',e.message) })
-  const deleteMat    = useMutation({ mutationFn:({matId}:{matId:number})=>window.api.products.deleteMaterial(selectedProduct!,matId), onSuccess:invProducts })
+  const createGroup = useMutation({ mutationFn: (d: unknown) => window.api.productGroups.create(d), onSuccess: () => { invGroups(); setShowGroupModal(false); toast.success('Gruppe angelegt') }, onError: (e: Error) => toast.error('Fehler', e.message) })
+  const updateGroup = useMutation({ mutationFn: ({ id, d }: { id: number; d: unknown }) => window.api.productGroups.update(id, d), onSuccess: () => { invGroups(); setShowGroupModal(false); toast.success('Gespeichert') }, onError: (e: Error) => toast.error('Fehler', e.message) })
+  const deleteProd  = useMutation({ mutationFn: (id: number) => window.api.products.delete(id), onSuccess: () => { invProducts(); setDeletingProduct(undefined); setSelectedProduct(null); toast.success('Gelöscht') } })
+  const deleteVar   = useMutation({ mutationFn: ({ vid }: { vid: number }) => window.api.products.deleteVariant(selectedProduct!, vid), onSuccess: () => { invProducts(); setDeletingVariant(undefined); toast.success('Variante gelöscht') } })
 
-  const detail = productDetail as { materials?: ProductMaterial[]; variants?: ProductVariant[] } | null
+  const detail   = productDetail as { name?: string; code?: string; group_name?: string; variants?: ProductVariant[] } | null
+  const variants = (detail?.variants ?? []) as ProductVariant[]
 
   if (isLoading) return (
     <div>
-      <div className="page-header mb-4">
-        <div><div className="h-7 w-32 bg-white/5 rounded-lg animate-pulse"/></div>
-      </div>
+      <div className="page-header mb-4"><div className="h-7 w-32 bg-white/5 rounded-lg animate-pulse"/></div>
       <div className="flex gap-4">
         <div className="w-72 space-y-2"><SkeletonList items={6}/></div>
-        <div className="flex-1 space-y-3"><SkeletonCard/><SkeletonCard/></div>
+        <div className="flex-1 space-y-3"><SkeletonCard/></div>
       </div>
     </div>
   )
 
   return (
     <div>
+      {/* Header */}
       <div className="page-header">
         <div>
           <h2 className="page-title">Produkte</h2>
@@ -250,378 +314,658 @@ export default function ProductsPage() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="secondary" size="sm" icon={<Plus size={12}/>}
-            onClick={()=>{setEditingGroup(undefined);setShowGroupModal(true)}}>
+            onClick={() => { setEditingGroup(undefined); setShowGroupModal(true) }}>
             Gruppe
           </Button>
-          {tab === 'products' && (<>
-            <div className="flex items-center gap-1">
-              <button onClick={async()=>{const r=await (window.api as any).exportImport?.exportProductsTemplate?.();if(r?.success){}}}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs text-slate-400 hover:text-white"
-                style={{border:'1px solid rgba(255,255,255,0.08)'}}>
-                <Download size={11}/>Vorlage
-              </button>
-              <button onClick={async()=>{const r=await (window.api as any).exportImport?.exportProductsXlsx?.();}}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs text-slate-400 hover:text-white"
-                style={{border:'1px solid rgba(255,255,255,0.08)'}}>
-                <FileSpreadsheet size={11}/>Excel
-              </button>
-              <button onClick={async()=>{const r=await (window.api as any).exportImport?.importProducts?.();if(r?.success)qc.invalidateQueries({queryKey:['products']})}}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs text-slate-400 hover:text-white"
-                style={{border:'1px solid rgba(255,255,255,0.08)'}}>
-                <Upload size={11}/>Import
-              </button>
-            </div>
-            <Button icon={<Plus size={14}/>}
-              onClick={()=>nav('/products/new')}>
-              Produkt anlegen
-            </Button>
-          </>)}
-          {tab === '2k' && (
-            <Button icon={<Plus size={14}/>}
-              onClick={()=>setShow2kModal(true)}>
-              2K-Produkt anlegen
-            </Button>
-          )}
+
+          <button
+              onClick={() => nav('/recipes')}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all"
+              style={{ background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.3)', color: '#a78bfa' }}
+            >
+              <FlaskConical size={14}/>
+              Produkt anlegen → Rezepturen
+              <ArrowRight size={13}/>
+            </button>
         </div>
       </div>
 
-      {/* Tab-Leiste */}
-      <div className="flex gap-1 mb-4 p-1 rounded-xl w-fit" style={{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.06)'}}>
-        {[{id:'products',l:'Rezepturen / Komponenten'},{id:'2k',l:'2K-Produkte'}].map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id as typeof tab)}
-            className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${tab===t.id?'bg-brand-500/20 text-white':'text-slate-500 hover:text-slate-300'}`}>
-            {t.l}
-          </button>
-        ))}
-      </div>
 
-      {tab==='2k' && <Products2kTab externalOpen={show2kModal} onExternalOpenHandled={()=>setShow2kModal(false)}/>}
 
-      {tab==='products' && <div className="flex gap-4">
-        {/* Linke Spalte – Gruppen + Liste */}
-        <div className="w-72 shrink-0 space-y-3">
-          {/* Filter */}
-          <div className="relative">
-            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"/>
-            <input className="form-input pl-9 text-sm" placeholder="Produkt suchen …"
-              value={search} onChange={e=>setSearch(e.target.value)}/>
-          </div>
 
-          {/* Gruppen als Filter */}
-          <div className="flex flex-wrap gap-1.5">
-            <button onClick={()=>setFilterGroup(null)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all border ${!filterGroup?'bg-brand-500/20 border-brand-500/30 text-white':'bg-white/3 border-white/8 text-slate-400 hover:text-slate-200'}`}>
-              Alle
-            </button>
-            {groups.map(g=>(
-              <button key={g.id} onClick={()=>setFilterGroup(g.id)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all border ${filterGroup===g.id?'text-white border-opacity-40':'bg-white/3 border-white/8 text-slate-400 hover:text-slate-200'}`}
-                style={filterGroup===g.id ? { backgroundColor:`${g.color}25`, borderColor:`${g.color}50`, color:'white' } : {}}>
-                <span className="inline-flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full" style={{backgroundColor:g.color}}/>
-                  {g.name}
-                </span>
+      <div className="flex gap-4">
+          {/* Linke Spalte */}
+          <div className="w-72 shrink-0 space-y-3">
+            <div className="relative">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"/>
+              <input
+                key="products-search"
+                className="form-input pl-9 text-sm w-full"
+                placeholder="Produkt suchen …"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                autoComplete="off"
+              />
+            </div>
+
+            <div className="flex flex-wrap gap-1.5">
+              <button onClick={() => setFilterGroup(null)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all border ${!filterGroup ? 'bg-brand-500/20 border-brand-500/30 text-white' : 'bg-white/3 border-white/8 text-slate-400 hover:text-slate-200'}`}>
+                Alle
               </button>
-            ))}
-          </div>
+              {groups.map(g => (
+                <button key={g.id} onClick={() => setFilterGroup(g.id)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all border ${filterGroup === g.id ? 'text-white' : 'bg-white/3 border-white/8 text-slate-400 hover:text-slate-200'}`}
+                  style={filterGroup === g.id ? { backgroundColor: `${g.color}25`, borderColor: `${g.color}50`, color: 'white' } : {}}>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: g.color }}/>
+                    {g.name}
+                  </span>
+                </button>
+              ))}
+            </div>
 
-          {/* Produkt-Liste */}
-          <div className="space-y-1.5">
-            {!products.length && (
-              <EmptyState icon={<Package size={32}/>} title="Keine Produkte"
-                action={<Button size="sm" icon={<Plus size={12}/>} onClick={()=>setShowProductModal(true)}>Erstes Produkt</Button>}/>
-            )}
-            {products.map(p=>(
-              <div key={p.id} onClick={()=>setSelectedProduct(p.id)}
-                className={`glass-card p-3 cursor-pointer transition-all group ${selectedProduct===p.id?'border-brand-500/40':'hover:border-white/10'}`}
-                style={selectedProduct===p.id ? { borderColor:`${p.group_color||'#8b5cf6'}50`, boxShadow:`0 0 16px ${p.group_color||'#8b5cf6'}15` } : {}}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-full" style={{backgroundColor:p.group_color||'#8b5cf6'}}/>
-                    <div>
-                      <p className="text-sm font-semibold text-slate-200">{p.name}</p>
-                      <p className="text-xs text-slate-500">{p.code}</p>
+            <div className="space-y-1.5">
+              {!products.length && (
+                <div className="text-center py-8">
+                  <Package size={32} className="text-slate-700 mx-auto mb-2"/>
+                  <p className="text-slate-500 text-sm">Keine Produkte</p>
+                  <button onClick={() => nav('/recipes')}
+                    className="mt-2 text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1 mx-auto">
+                    → Unter Rezepturen anlegen
+                  </button>
+                </div>
+              )}
+              {products.map(p => (
+                <div key={p.id} onClick={() => setSelectedProduct(p.id)}
+                  className={`glass-card p-3 cursor-pointer transition-all group ${selectedProduct === p.id ? 'border-brand-500/40' : 'hover:border-white/10'}`}
+                  style={selectedProduct === p.id ? { borderColor: `${p.group_color || '#8b5cf6'}50`, boxShadow: `0 0 16px ${p.group_color || '#8b5cf6'}15` } : {}}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: p.group_color || '#8b5cf6' }}/>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-200">{p.name}</p>
+                        <p className="text-xs text-slate-500">{p.code}</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={e => { e.stopPropagation(); nav('/recipes') }}
+                        className="btn-ghost p-1 text-slate-400" title="In Rezepturen bearbeiten">
+                        <Pencil size={11}/>
+                      </button>
+                      <button onClick={e => { e.stopPropagation(); setDeletingProduct(p) }}
+                        className="btn-ghost p-1 text-red-400"><Trash2 size={11}/></button>
                     </div>
                   </div>
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100">
-                    <button onClick={e=>{e.stopPropagation();setEditingProduct(p);setShowProductModal(true)}} className="btn-ghost p-1"><Pencil size={11}/></button>
-                    <button onClick={e=>{e.stopPropagation();setDeletingProduct(p)}} className="btn-ghost p-1 text-red-400"><Trash2 size={11}/></button>
+                  <div className="mt-1.5 flex items-center gap-2">
+                    {p.group_name && <span className="text-xs text-slate-500">{p.group_name}</span>}
+                    <span className="badge-blue text-[10px]">{p.variant_count ?? 0} Varianten</span>
                   </div>
                 </div>
-                <div className="mt-1.5 flex items-center gap-2">
-                  {p.group_name && <span className="text-xs text-slate-500">{p.group_name}</span>}
-                  <span className="badge-slate text-[10px]">{p.material_count??0} Stoffe</span>
-                  <span className="badge-blue text-[10px]">{p.variant_count??0} Var.</span>
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
+
+          {/* Rechte Spalte – nur Varianten */}
+          {!selectedProduct ? (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center">
+                <Package size={48} className="text-slate-700 mx-auto mb-4"/>
+                <p className="text-slate-400 font-semibold">Produkt auswählen</p>
+                <p className="text-slate-600 text-sm mt-1">
+                  Produkte anlegen: <button onClick={() => nav('/recipes')} className="text-brand-400 hover:text-brand-300">→ Rezepturen</button>
+                </p>
+              </div>
+            </div>
+          ) : !detail ? <Spinner/> : (
+            <div className="flex-1 space-y-4">
+              {/* Header — nur Name + Gruppe */}
+              <div className="glass-card p-4 flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-white">{detail.name}</h3>
+                  {detail.group_name && (
+                    <p className="text-sm text-slate-500 mt-0.5">{detail.group_name}</p>
+                  )}
+                </div>
+                <button onClick={() => nav('/recipes')}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs text-slate-400 hover:text-white transition-all"
+                  style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
+                  <FlaskConical size={12}/>
+                  Rezeptur bearbeiten
+                  <ArrowRight size={11}/>
+                </button>
+              </div>
+
+              {/* Varianten */}
+              <div className="glass-card p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                    <Layers size={14} className="text-cyan-400"/> Varianten
+                    <span className="text-xs text-slate-500 font-normal">({variants.length})</span>
+                  </h4>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="secondary" icon={<Plus size={12}/>}
+                      onClick={() => setShowCopyModal(true)}
+                      title="Varianten von anderem Produkt kopieren">
+                      Kopieren
+                    </Button>
+                    <Button size="sm" variant="secondary"
+                      onClick={() => setShowGenerator(true)}>
+                      Generator
+                    </Button>
+                    <Button size="sm" icon={<Plus size={12}/>}
+                      onClick={() => { setEditingVariant(undefined); setShowVariantModal(true) }}>
+                      Variante anlegen
+                    </Button>
+                  </div>
+                </div>
+
+                {!variants.length ? (
+                  <div className="text-center py-8">
+                    <Layers size={28} className="text-slate-700 mx-auto mb-2"/>
+                    <p className="text-slate-500 text-sm">Noch keine Varianten</p>
+                    <p className="text-slate-600 text-xs mt-1">Lege Varianten mit Füllmenge, Verpackung und Etikett an</p>
+                    <Button className="mt-3" size="sm" icon={<Plus size={12}/>}
+                      onClick={() => { setEditingVariant(undefined); setShowVariantModal(true) }}>
+                      Erste Variante anlegen
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {variants.map(v => (
+                      <div key={v.id} className="p-4 rounded-xl group"
+                        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                        <div className="flex items-start justify-between mb-2">
+                          <div>
+                            <p className="text-sm font-bold text-white">{v.name}</p>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              {v.fill_quantity} {v.fill_unit}
+                            </p>
+                          </div>
+                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => { setEditingVariant(v); setShowVariantModal(true) }}
+                              className="btn-ghost p-1 text-slate-400 hover:text-white">
+                              <Pencil size={11}/>
+                            </button>
+                            <button onClick={() => setDeletingVariant(v)}
+                              className="btn-ghost p-1 text-red-400">
+                              <Trash2 size={11}/>
+                            </button>
+                          </div>
+                        </div>
+                        <div className="space-y-1 text-xs">
+                          {v.ean && <p className="text-slate-600 font-mono">EAN: {v.ean}</p>}
+                          {v.packaging_name && (
+                            <p className="text-slate-500">📦 {v.packaging_name}
+                              {v.packaging_price ? <span className="text-slate-600 ml-1">({fmt(v.packaging_price)})</span> : ''}
+                            </p>
+                          )}
+                          {v.label_name && (
+                            <p className="text-slate-500">🏷 {v.label_name}
+                              {v.label_price ? <span className="text-slate-600 ml-1">({fmt(v.label_price)})</span> : ''}
+                            </p>
+                          )}
+                          {v.carton_name && (
+                            <p className="text-slate-500">📫 {v.carton_name}
+                              {v.carton_price ? <span className="text-slate-600 ml-1">({fmt(v.carton_price)} / {v.units_per_carton} Stk)</span> : ''}
+                            </p>
+                          )}
+                          {v.extra_cost > 0 && (
+                            <p className="text-slate-500">+ {fmt(v.extra_cost)} Zusatz{v.extra_cost_note ? ` (${v.extra_cost_note})` : ''}</p>
+                          )}
+                        </div>
+                        <VariantCostCard variantId={v.id}/>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Rechte Spalte – Detailansicht + Live-Kalkulation */}
-        {!selectedProduct ? (
-          <div className="flex-1 flex items-center justify-center">
-            <EmptyState icon={<Package size={40}/>} title="Produkt auswählen"
-              description="Wähle links ein Produkt oder lege ein neues an."/>
-          </div>
-        ) : !detail ? <Spinner/> : (
-          <div className="flex-1 flex gap-4 min-w-0">
-          <div className="flex-1 space-y-4 min-w-0">
-            {/* Header */}
-            <div className="glass-card p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-bold text-white">{(detail as any).name}</h3>
-                  <p className="text-sm text-slate-500 mt-0.5">
-                    {(detail as any).group_name} · {(detail as any).batch_size} {(detail as any).batch_unit} Batch · Overhead {(((detail as any).overhead_factor-1)*100).toFixed(0)}%
-                  </p>
-                </div>
-                <Button size="sm" variant="secondary" icon={<Pencil size={12}/>}
-                  onClick={()=>{setEditingProduct(detail as any);setShowProductModal(true)}}>
-                  Bearbeiten
+      {/* Modals */}
+      {showGroupModal && (
+        <GroupModal group={editingGroup}
+          onSave={d => editingGroup ? updateGroup.mutate({ id: editingGroup.id, d }) : createGroup.mutate(d)}
+          onClose={() => setShowGroupModal(false)}/>
+      )}
+
+      {showVariantModal && selectedProduct && (
+        <VariantModal
+          productId={selectedProduct}
+          variant={editingVariant}
+          packaging={packaging}
+          labels={labels}
+          cartons={cartons}
+          onClose={() => { setShowVariantModal(false); setEditingVariant(undefined) }}
+          onSaved={invProducts}
+        />
+      )}
+
+
+      {showGenerator && selectedProduct && (
+        <VariantGenerator
+          productId={selectedProduct}
+          productCode={(detail as any)?.code || 'PRD'}
+          packaging={packaging}
+          labels={labels}
+          cartons={cartons}
+          onClose={() => setShowGenerator(false)}
+          onSaved={invProducts}
+        />
+      )}
+
+      {showCopyModal && selectedProduct && (
+        <CopyVariantsModal
+          productId={selectedProduct}
+          allProducts={products}
+          onClose={() => setShowCopyModal(false)}
+          onSaved={invProducts}
+        />
+      )}
+
+      <ConfirmDialog open={!!deletingProduct} title="Produkt löschen?"
+        message={`"${deletingProduct?.name}" und alle Varianten wirklich löschen?`}
+        onConfirm={() => deletingProduct && deleteProd.mutate(deletingProduct.id)}
+        onCancel={() => setDeletingProduct(undefined)} loading={deleteProd.isPending}/>
+
+      <ConfirmDialog open={!!deletingVariant} title="Variante löschen?"
+        message={`"${deletingVariant?.name}" löschen?`}
+        onConfirm={() => deletingVariant && deleteVar.mutate({ vid: deletingVariant.id })}
+        onCancel={() => setDeletingVariant(undefined)} loading={deleteVar.isPending}/>
+    </div>
+  )
+}
+
+// ── 2K PRODUKTE TAB (unverändert) ────────────────────────────
+
+
+interface GenConfig {
+  name: string; code: string; fill_unit: string
+  packaging_id: string; packaging_qty: number
+  label_id: string
+  carton_id: string; units_per_carton: number
+  extra_cost: number
+}
+
+// ── Varianten-Generator (aus Varianten-Vorlagen) ─────────────
+function VariantGenerator({ productId, productCode, packaging, labels, cartons, onClose, onSaved }: {
+  productId: number; productCode: string
+  packaging: any[]; labels: any[]; cartons: any[]
+  onClose: () => void; onSaved: () => void
+}) {
+  const toast = useToast()
+  const [step, setStep]       = useState<1|2>(1)
+  const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [configs, setConfigs]   = useState<Record<number, GenConfig & { template: any }>>({})
+  const [saving, setSaving]     = useState(false)
+
+  // Varianten-Vorlagen aus DB laden
+  const { data: templates = [], isLoading: loadingTemplates } = useQuery<any[]>({
+    queryKey: ['variant-templates'],
+    queryFn: () => window.api.variantTemplates.list() as Promise<any[]>,
+  })
+
+  const defaultConfig = (tmpl: any): GenConfig & { template: any } => ({
+    template: tmpl,
+    name: tmpl.name || `${tmpl.fill_amount} ${tmpl.fill_unit} Set`,
+    code: `${productCode}-${String(tmpl.fill_amount).replace('.','_')}${tmpl.fill_unit}`.toUpperCase(),
+    fill_unit: tmpl.fill_unit || 'kg',
+    packaging_id: '', packaging_qty: 1,
+    label_id: '',
+    carton_id: '', units_per_carton: 1,
+    extra_cost: 0,
+  })
+
+  const toggleTemplate = (id: number) => {
+    const tmpl = templates.find(t => t.id === id)
+    if (!tmpl) return
+    setSelectedIds(prev => {
+      if (prev.includes(id)) return prev.filter(i => i !== id)
+      setConfigs(c => ({ ...c, [id]: c[id] || defaultConfig(tmpl) }))
+      return [...prev, id]
+    })
+  }
+
+  const setConfig = (id: number, key: keyof GenConfig, value: any) =>
+    setConfigs(c => ({ ...c, [id]: { ...c[id], [key]: value } }))
+
+  const saveAll = async () => {
+    if (!selectedIds.length) return
+    setSaving(true)
+    try {
+      for (const id of selectedIds) {
+        const cfg = configs[id]
+        if (!cfg) continue
+        await window.api.products.saveVariant(productId, {
+          name:               cfg.name,
+          code:               cfg.code.toUpperCase(),
+          fill_quantity:      cfg.template.fill_amount,
+          fill_unit:          cfg.fill_unit,
+          packaging_item_id:  cfg.packaging_id ? Number(cfg.packaging_id) : null,
+          packaging_quantity: cfg.packaging_qty || 1,
+          label_item_id:      cfg.label_id  ? Number(cfg.label_id)  : null,
+          carton_item_id:     cfg.carton_id ? Number(cfg.carton_id) : null,
+          units_per_carton:   cfg.units_per_carton || 1,
+          extra_cost:         cfg.extra_cost || 0,
+          sku: cfg.template.sku || null,
+          ean: cfg.template.ean || null,
+        })
+      }
+      toast.success(`${selectedIds.length} Varianten angelegt`)
+      onSaved()
+      onClose()
+    } catch (e: any) {
+      toast.error('Fehler', e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Varianten-Generator" size="xl">
+      <div className="space-y-4">
+        {/* Step 1: Vorlagen auswählen */}
+        {step === 1 && (
+          <>
+            <p className="text-xs text-slate-400">
+              Wähle Varianten aus deinen <strong className="text-slate-300">Varianten-Vorlagen</strong>.
+              Im nächsten Schritt konfigurierst du Verpackung, Etikett und Karton pro Variante.
+            </p>
+
+            {loadingTemplates && <p className="text-xs text-slate-500 text-center py-6">Lade Vorlagen …</p>}
+
+            {!loadingTemplates && !templates.length && (
+              <div className="text-center py-8 space-y-2">
+                <Layers size={32} className="text-slate-700 mx-auto"/>
+                <p className="text-sm text-slate-400">Keine Varianten-Vorlagen vorhanden</p>
+                <p className="text-xs text-slate-600">Lege zuerst unter <strong className="text-slate-400">Varianten-Vorlagen</strong> Größen an (z.B. 0,75 kg, 1,5 kg …)</p>
+              </div>
+            )}
+
+            {!loadingTemplates && templates.length > 0 && (
+              <div className="grid grid-cols-4 gap-2">
+                {templates.map((tmpl: any) => {
+                  const isSel = selectedIds.includes(tmpl.id)
+                  return (
+                    <button key={tmpl.id} onClick={() => toggleTemplate(tmpl.id)}
+                      className="p-3 rounded-xl text-left transition-all border"
+                      style={isSel ? {
+                        background: 'rgba(99,102,241,0.15)', borderColor: 'rgba(99,102,241,0.5)',
+                      } : {
+                        background: 'rgba(255,255,255,0.03)', borderColor: 'rgba(255,255,255,0.08)',
+                      }}>
+                      <p className="text-sm font-bold" style={{ color: isSel ? '#a5b4fc' : '#e2e8f0' }}>
+                        {tmpl.fill_amount} {tmpl.fill_unit}
+                      </p>
+                      <p className="text-[10px] text-slate-500 mt-0.5 truncate">{tmpl.name}</p>
+                      {tmpl.ean && <p className="text-[10px] font-mono text-slate-700 mt-0.5">EAN: {tmpl.ean}</p>}
+                      {isSel && <p className="text-[10px] text-indigo-400 mt-1">✓ ausgewählt</p>}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            <div className="flex justify-between pt-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500">{selectedIds.length} Vorlagen ausgewählt</span>
+                {templates.length > 0 && (
+                  <button className="text-xs text-brand-400 hover:text-brand-300"
+                    onClick={() => {
+                      if (selectedIds.length === templates.length) {
+                        setSelectedIds([])
+                      } else {
+                        const newSel = templates.map((t: any) => t.id)
+                        setConfigs(prev => {
+                          const next = { ...prev }
+                          templates.forEach((t: any) => { if (!next[t.id]) next[t.id] = defaultConfig(t) })
+                          return next
+                        })
+                        setSelectedIds(newSel)
+                      }
+                    }}>
+                    {selectedIds.length === templates.length ? 'Alle abwählen' : 'Alle auswählen'}
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={onClose}>Abbrechen</Button>
+                <Button disabled={!selectedIds.length} onClick={() => setStep(2)}>
+                  Weiter → Konfigurieren
                 </Button>
               </div>
             </div>
+          </>
+        )}
 
-            {/* Rohstoffe */}
-            <div className="glass-card p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="text-sm font-bold text-slate-200 flex items-center gap-2">
-                  <FlaskConical size={14} className="text-brand-400"/> Rohstoffe / Rezeptur
-                </h4>
-                <button onClick={()=>nav(`/products/new`)}
-                  className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1">
-                  <Pencil size={11}/>Rezeptur bearbeiten →
-                </button>
-              </div>
-              {!detail.materials?.length ? (
-                <p className="text-xs text-slate-600 text-center py-4">Noch keine Rohstoffe</p>
-              ) : (
-                <div className="space-y-2">
-                  {detail.materials.map(m=>(
-                    <MaterialRow key={m.id} mat={m} onDelete={id=>deleteMat.mutate({matId:id})}/>
-                  ))}
-                </div>
-              )}
+        {/* Step 2: Konfiguration pro Vorlage */}
+        {step === 2 && (
+          <>
+            <p className="text-xs text-slate-400">
+              Konfiguriere Verpackung, Etikett und Karton. Bei z.B. 15 kg: Kanister + Anzahl 3.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs" style={{ minWidth: 800 }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                    {['Vorlage', 'Bezeichnung', 'Verpackung', 'Anz.', 'Etikett', 'Karton', 'Stk/Kt', 'Extra €'].map(h => (
+                      <th key={h} className="px-2 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-slate-500">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedIds.map(id => {
+                    const cfg = configs[id]
+                    if (!cfg) return null
+                    const upd = (k: keyof GenConfig, v: any) => setConfig(id, k, v)
+                    return (
+                      <tr key={id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        <td className="px-2 py-2 font-black text-white whitespace-nowrap">
+                          {cfg.template.fill_amount} {cfg.template.fill_unit}
+                        </td>
+                        <td className="px-1 py-1">
+                          <input className="form-input text-xs w-32" value={cfg.name}
+                            onChange={e => upd('name', e.target.value)}/>
+                        </td>
+                        <td className="px-1 py-1">
+                          <input className="form-input text-xs w-28 font-mono" value={cfg.code}
+                            onChange={e => upd('code', e.target.value.toUpperCase())}/>
+                        </td>
+                        <td className="px-1 py-1">
+                          <select className="form-input text-xs w-36" value={cfg.packaging_id}
+                            onChange={e => upd('packaging_id', e.target.value)}>
+                            <option value="">– kein –</option>
+                            {packaging.map((p: any) => (
+                              <option key={p.id} value={p.id}>{p.name} ({p.price_per_unit||0}€)</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-1 py-1">
+                          <input type="number" min="1" className="form-input text-xs w-14 font-mono text-center"
+                            value={cfg.packaging_qty}
+                            onChange={e => upd('packaging_qty', Number(e.target.value) || 1)}
+                            title="Anzahl dieser Verpackung (z.B. 3 × 5L Kanister)"/>
+                        </td>
+                        <td className="px-1 py-1">
+                          <select className="form-input text-xs w-32" value={cfg.label_id}
+                            onChange={e => upd('label_id', e.target.value)}>
+                            <option value="">– kein –</option>
+                            {labels.map((l: any) => (
+                              <option key={l.id} value={l.id}>{l.name}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-1 py-1">
+                          <select className="form-input text-xs w-32" value={cfg.carton_id}
+                            onChange={e => upd('carton_id', e.target.value)}>
+                            <option value="">– kein –</option>
+                            {cartons.map((c: any) => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-1 py-1">
+                          <input type="number" min="1" className="form-input text-xs w-14 font-mono text-center"
+                            value={cfg.units_per_carton}
+                            onChange={e => upd('units_per_carton', Number(e.target.value) || 1)}/>
+                        </td>
+                        <td className="px-1 py-1">
+                          <input type="number" min="0" step="0.01" className="form-input text-xs w-16 font-mono"
+                            value={cfg.extra_cost}
+                            onChange={e => upd('extra_cost', Number(e.target.value))}/>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
 
-            {/* Varianten */}
-            <div className="glass-card p-4">
-              <h4 className="text-sm font-bold text-slate-200 flex items-center gap-2 mb-3">
-                <Layers size={14} className="text-cyan-400"/> Varianten & Kosten
-              </h4>
-              {!detail.variants?.length ? (
-                <p className="text-xs text-slate-600 text-center py-4">Noch keine Varianten</p>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {detail.variants.map(v=>(
-                    <div key={v.id} className="p-3 rounded-xl bg-white/3 border border-white/5">
-                      <div className="flex items-center justify-between mb-2">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-200">{v.name}</p>
-                          <p className="text-xs text-slate-500">{v.fill_quantity} {v.fill_unit}</p>
-                        </div>
-                        <span className="badge-blue text-xs">{v.code}</span>
-                      </div>
-                      {v.packaging_name && <p className="text-xs text-slate-500 mb-1">📦 {v.packaging_name}</p>}
-                      {v.label_name     && <p className="text-xs text-slate-500 mb-1">🏷 {v.label_name}</p>}
-                      <div className="mt-2 pt-2 border-t border-white/5">
-                        <VariantCostCard variantId={v.id}/>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Live-Kalkulation Panel */}
-          {detail.materials?.length > 0 && (() => {
-            const mats = detail.materials as any[]
-            const total = mats.reduce((s:number,m:any)=>s+(m.quantity||0),0)
-            const colors = ['#8b5cf6','#06b6d4','#10b981','#f59e0b','#ec4899','#ef4444','#a78bfa','#34d399']
-            const priceKg = mats.reduce((s:number,m:any,i:number)=>{
-              const qty=m.quantity||0; const p=m.pref_price||0
-              return s + (total>0?(qty/total)*p:0)
-            },0)
-            return (
-              <div className="w-60 shrink-0">
-                <div className="glass-card p-4 sticky top-4" style={{border:'1px solid rgba(139,92,246,0.2)'}}>
-                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-3">Live-Kalkulation</p>
-                  {/* Prozentbalken */}
-                  <div className="flex rounded-full overflow-hidden h-2 mb-3">
-                    {mats.filter((m:any)=>m.quantity>0).map((m:any,i:number)=>{
-                      const pct=total>0?((m.quantity||0)/total)*100:0
-                      return <div key={m.id} style={{width:`${pct}%`,background:colors[i%colors.length]}} title={`${m.material_name}: ${pct.toFixed(1)}%`}/>
-                    })}
-                  </div>
-                  {/* Zeilen */}
-                  <div className="space-y-1 mb-3">
-                    {mats.map((m:any,i:number)=>{
-                      const pct=total>0?((m.quantity||0)/total)*100:0
-                      return (
-                        <div key={m.id} className="flex items-center justify-between text-[10px]">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <span className="font-bold text-slate-600">{i+1}</span>
-                            <span className="w-2 h-2 rounded-full shrink-0" style={{background:colors[i%colors.length]}}/>
-                            <span className="text-slate-400 truncate">{m.material_name}</span>
-                          </div>
-                          <div className="text-right shrink-0 ml-1">
-                            <span className="text-slate-300 font-mono">{pct.toFixed(1)}%</span>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                  {/* Gewicht */}
-                  <div className="border-t border-white/8 pt-2 space-y-1 text-xs">
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Charge</span>
-                      <span className="font-mono text-slate-300">{total} kg</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">pro kg</span>
-                      <span className="font-mono text-slate-300">{(total/1000*1).toFixed(4)} kg</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">pro 100g</span>
-                      <span className="font-mono text-slate-300">{(total/10000).toFixed(4)} kg</span>
-                    </div>
-                  </div>
-                  {/* Preis */}
-                  {priceKg>0&&(
-                    <div className="mt-3 p-2 rounded-xl text-center" style={{background:'rgb(139 92 246/0.08)',border:'1px solid rgb(139 92 246/0.2)'}}>
-                      <p className="text-[10px] text-slate-500 mb-0.5">Preis / kg</p>
-                      <p className="text-lg font-black text-white font-mono">{priceKg.toFixed(4).replace('.',',')} €</p>
-                    </div>
-                  )}
-                  {/* Delete product button */}
-                  <button onClick={()=>setDeletingProduct(detail as any)}
-                    className="mt-3 w-full py-1.5 rounded-xl text-xs text-red-400 hover:bg-red-500/10 transition-all border border-red-500/20 flex items-center justify-center gap-1.5">
-                    <Trash2 size={11}/>Produkt löschen
-                  </button>
-                </div>
+            <div className="flex justify-between items-center pt-2 border-t border-white/6">
+              <Button variant="secondary" onClick={() => setStep(1)}>← Zurück</Button>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-slate-500">{selectedIds.length} Varianten werden angelegt</span>
+                <Button loading={saving} onClick={saveAll}>
+                  {selectedIds.length} Varianten anlegen
+                </Button>
               </div>
-            )
-          })()}
+            </div>
+          </>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
+// ── Varianten kopieren ──────────────────────────────────────────
+function CopyVariantsModal({ productId, allProducts, onClose, onSaved }: {
+  productId: number; allProducts: any[]
+  onClose: () => void; onSaved: () => void
+}) {
+  const toast = useToast()
+  const [sourceId, setSourceId] = useState('')
+  const [sourceVariants, setSourceVariants] = useState<any[]>([])
+  const [selected, setSelected] = useState<number[]>([])
+  const [loading, setLoading]   = useState(false)
+  const [saving, setSaving]     = useState(false)
+
+  const loadSource = async (id: number) => {
+    setLoading(true)
+    try {
+      const detail = await window.api.products.get(id) as any
+      setSourceVariants(detail?.variants ?? [])
+      setSelected((detail?.variants ?? []).map((v: any) => v.id))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const copySelected = async () => {
+    if (!selected.length) return
+    setSaving(true)
+    try {
+      const toCopy = sourceVariants.filter(v => selected.includes(v.id))
+      for (const v of toCopy) {
+        await window.api.products.saveVariant(productId, {
+          name:              v.name,
+          code:              v.code + (toCopy.length > 1 ? '' : '-COPY'),
+          fill_quantity:     v.fill_quantity,
+          fill_unit:         v.fill_unit,
+          packaging_item_id: v.packaging_item_id,
+          packaging_quantity: (v as any).packaging_quantity || 1,
+          label_item_id:     v.label_item_id,
+          carton_item_id:    v.carton_item_id,
+          units_per_carton:  v.units_per_carton,
+          extra_cost:        v.extra_cost,
+          extra_cost_note:   v.extra_cost_note,
+          ean: null, sku: null,
+        })
+      }
+      toast.success(`${selected.length} Varianten kopiert`)
+      onSaved()
+      onClose()
+    } catch (e: any) {
+      toast.error('Fehler', e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const fmt = (v: number) => v > 0 ? `${v % 1 === 0 ? v : String(v).replace('.',',')} kg` : ''
+
+  return (
+    <Modal open onClose={onClose} title="Varianten kopieren von …" size="md">
+      <div className="space-y-4">
+        <div>
+          <label className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-1.5 block">
+            Quellprodukt auswählen
+          </label>
+          <select className="form-input w-full text-sm text-white"
+            value={sourceId}
+            onChange={e => { setSourceId(e.target.value); if (e.target.value) loadSource(Number(e.target.value)) }}>
+            <option value="">– Produkt wählen –</option>
+            {allProducts.filter(p => p.id !== productId).map((p: any) => (
+              <option key={p.id} value={p.id}>{p.name} ({p.code}) — {p.variant_count || 0} Varianten</option>
+            ))}
+          </select>
+        </div>
+
+        {loading && <p className="text-xs text-slate-500 text-center py-4">Lade Varianten …</p>}
+
+        {!loading && sourceVariants.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                Varianten auswählen ({selected.length}/{sourceVariants.length})
+              </label>
+              <button className="text-xs text-brand-400 hover:text-brand-300"
+                onClick={() => setSelected(selected.length === sourceVariants.length ? [] : sourceVariants.map(v => v.id))}>
+                {selected.length === sourceVariants.length ? 'Alle abwählen' : 'Alle auswählen'}
+              </button>
+            </div>
+            <div className="space-y-1.5 max-h-60 overflow-y-auto">
+              {sourceVariants.map(v => (
+                <label key={v.id} className="flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all"
+                  style={{
+                    background: selected.includes(v.id) ? 'rgba(99,102,241,0.1)' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${selected.includes(v.id) ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.06)'}`,
+                  }}>
+                  <input type="checkbox" checked={selected.includes(v.id)}
+                    onChange={e => setSelected(prev => e.target.checked ? [...prev, v.id] : prev.filter(id => id !== v.id))}
+                    className="w-4 h-4 rounded accent-indigo-500"/>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-slate-200">{v.name}</p>
+                    <p className="text-xs text-slate-500">
+                      {fmt(v.fill_quantity)} {v.fill_unit}
+                      {v.packaging_name && ` · ${v.packaging_name}`}
+                    </p>
+                  </div>
+                  <span className="text-xs font-mono text-slate-600">{v.code}</span>
+                </label>
+              ))}
+            </div>
           </div>
         )}
-      </div>}
 
-      {tab==='products' && <>{/* Modals */}
-      {showGroupModal && (
-        <GroupModal group={editingGroup}
-          onSave={d=>editingGroup?updateGroup.mutate({id:editingGroup.id,d}):createGroup.mutate(d)}
-          onClose={()=>setShowGroupModal(false)}/>
-      )}
+        {!loading && sourceId && !sourceVariants.length && (
+          <p className="text-xs text-slate-600 text-center py-4 italic">Dieses Produkt hat keine Varianten</p>
+        )}
 
-      {showProductModal && (
-        <Modal open onClose={()=>setShowProductModal(false)}
-          title={editingProduct?'Produkt bearbeiten':'Neues Produkt'} size="md">
-          <ProductForm
-            initial={editingProduct} groups={groups}
-            onSave={d=>editingProduct?updateProd.mutate({id:editingProduct.id,d}):createProd.mutate(d)}
-            onClose={()=>setShowProductModal(false)}
-            loading={createProd.isPending||updateProd.isPending}/>
-        </Modal>
-      )}
-
-      {showMatModal && selectedProduct && (
-        <Modal open onClose={()=>setShowMatModal(false)} title="Rohstoff hinzufügen" size="sm">
-          <div className="space-y-3">
-            <Select label="Rohstoff *" value={newMatForm.material_id}
-              onChange={e=>setNewMatForm(f=>({...f,material_id:e.target.value}))}>
-              <option value="">– Wählen –</option>
-              {(allMaterials as any[]).map((m:any)=>(
-                <option key={m.id} value={m.id}>{m.name} ({m.code})</option>
-              ))}
-            </Select>
-            <div className="grid grid-cols-2 gap-3">
-              <Input label="Menge *" type="number" step="0.001" value={newMatForm.quantity}
-                onChange={e=>setNewMatForm(f=>({...f,quantity:e.target.value}))}/>
-              <Select label="Einheit" value={newMatForm.unit}
-                onChange={e=>setNewMatForm(f=>({...f,unit:e.target.value}))}>
-                {['g','kg','ml','l'].map(u=><option key={u}>{u}</option>)}
-              </Select>
-              <Input label="Ausschuss %" type="number" step="0.01" value={newMatForm.waste_factor}
-                onChange={e=>setNewMatForm(f=>({...f,waste_factor:e.target.value}))}/>
-            </div>
-            <div className="flex justify-end gap-3 pt-2">
-              <Button variant="secondary" onClick={()=>setShowMatModal(false)}>Abbrechen</Button>
-              <Button loading={saveMat.isPending}
-                disabled={!newMatForm.material_id||!newMatForm.quantity}
-                onClick={()=>saveMat.mutate({d:{
-                  material_id:Number(newMatForm.material_id),
-                  quantity:Number(newMatForm.quantity),
-                  unit:newMatForm.unit,
-                  waste_factor:Number(newMatForm.waste_factor)/100,
-                }})}>
-                Hinzufügen
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      </>}
-    {/* Delete confirmation - always rendered */}
-    <ConfirmDialog open={!!deletingProduct} title="Produkt löschen?"
-      message={`"${deletingProduct?.name}" und alle Varianten wirklich löschen?`}
-      onConfirm={()=>deletingProduct&&deleteProd.mutate(deletingProduct.id)}
-      onCancel={()=>setDeletingProduct(undefined)} loading={deleteProd.isPending}/>
-    </div>
-  )
-}
-
-function ProductForm({ initial, groups, onSave, onClose, loading }: {
-  initial?: Product; groups: ProductGroup[]; onSave:(d:unknown)=>void; onClose:()=>void; loading?:boolean
-}) {
-  const [form, setForm] = useState({
-    name:             initial?.name            ?? '',
-    code:             initial?.code            ?? '',
-    product_group_id: initial?.product_group_id?.toString() ?? '',
-    batch_size:       initial?.batch_size       ?? 1000,
-    batch_unit:       initial?.batch_unit       ?? 'g',
-    overhead_factor:  initial ? ((initial.overhead_factor-1)*100) : 5,
-  })
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3">
-        <div className="col-span-2">
-          <Input label="Name *" value={form.name} autoFocus onChange={e=>setForm(f=>({...f,name:e.target.value}))}/>
+        <div className="flex justify-end gap-3 pt-2 border-t border-white/6">
+          <Button variant="secondary" onClick={onClose}>Abbrechen</Button>
+          <Button disabled={!selected.length} loading={saving} onClick={copySelected}>
+            {selected.length} Varianten kopieren
+          </Button>
         </div>
-        <Input label="Code *" value={form.code} onChange={e=>setForm(f=>({...f,code:e.target.value.toUpperCase()}))}/>
-        <Select label="Produktgruppe" value={form.product_group_id}
-          onChange={e=>setForm(f=>({...f,product_group_id:e.target.value}))}>
-          <option value="">– Keine –</option>
-          {groups.map(g=><option key={g.id} value={g.id}>{g.name}</option>)}
-        </Select>
-        <Input label="Batch-Größe" type="number" value={form.batch_size}
-          onChange={e=>setForm(f=>({...f,batch_size:Number(e.target.value)}))}/>
-        <Select label="Batch-Einheit" value={form.batch_unit}
-          onChange={e=>setForm(f=>({...f,batch_unit:e.target.value}))}>
-          {['g','kg','ml','l'].map(u=><option key={u}>{u}</option>)}
-        </Select>
-        <Input label="Overhead %" type="number" step="0.1" value={form.overhead_factor}
-          onChange={e=>setForm(f=>({...f,overhead_factor:Number(e.target.value)}))}
-          hint="z.B. 5 = 5% Aufschlag auf Rohstoffkosten"/>
       </div>
-      <div className="flex justify-end gap-3 pt-2">
-        <Button variant="secondary" onClick={onClose}>Abbrechen</Button>
-        <Button loading={loading} onClick={()=>onSave({
-          ...initial, ...form,
-          product_group_id: form.product_group_id ? Number(form.product_group_id) : null,
-          overhead_factor: 1 + form.overhead_factor/100,
-        })}>{initial?'Speichern':'Anlegen'}</Button>
-      </div>
-    </div>
+    </Modal>
   )
 }
 
-// ─────────────────────────────────────────────────────────────
-// 2K PRODUKTE SECTION (wird in Tab integriert)
-// ─────────────────────────────────────────────────────────────
 
+// ── 2K PRODUKTE TAB ─────────────────────────────────────────
 interface Product2k {
   id: number; name: string; code: string
   product_group_id: number|null; group_name?: string; group_color?: string
@@ -646,7 +990,7 @@ const EMPTY_2K = {
   component_b_id:'', component_b_name:'',
   mix_ratio_a:'100', mix_ratio_b:'50', notes:''
 }
-const EMPTY_VARIANT: Omit<Variant2k,'id'> = {
+const EMPTY_2K_VARIANT: Omit<Variant2k,'id'> = {
   name:'', code:'', total_fill_kg:0,
   packaging_a_id:null, lid_a_id:null,
   packaging_b_id:null, lid_b_id:null,
@@ -674,7 +1018,7 @@ export function Products2kTab({externalOpen=false, onExternalOpenHandled}:{exter
   const [deleting, setDeleting] = useState<Product2k|undefined>()
   const [showVariantModal, setShowVariantModal] = useState(false)
   const [editingVariant, setEditingVariant]     = useState<Variant2k|undefined>()
-  const [variantForm, setVariantForm]           = useState<typeof EMPTY_VARIANT>(EMPTY_VARIANT)
+  const [variantForm, setVariantForm]           = useState<typeof EMPTY_2K_VARIANT>(EMPTY_2K_VARIANT)
   const [selectedSizes, setSelectedSizes]       = useState<number[]>([])
   const [variantMode, setVariantMode]           = useState<'generator'|'manual'>('generator')
   const [assignDetails, setAssignDetails]       = useState<Record<number,{ean:string;article_number:string;price:string;vat:string}>>({})
@@ -861,7 +1205,7 @@ export function Products2kTab({externalOpen=false, onExternalOpenHandled}:{exter
               <div className="flex items-center justify-between mb-4">
                 <p className="text-sm font-bold text-slate-200">Varianten</p>
                 <Button size="sm" icon={<Plus size={12}/>}
-                  onClick={()=>{setEditingVariant(undefined);setVariantForm({...EMPTY_VARIANT});setShowVariantModal(true)}}>
+                  onClick={()=>{setEditingVariant(undefined);setVariantForm({...EMPTY_2K_VARIANT});setShowVariantModal(true)}}>
                   Varianten zuweisen
                 </Button>
               </div>
@@ -893,7 +1237,7 @@ export function Products2kTab({externalOpen=false, onExternalOpenHandled}:{exter
                             {a.target_price_net!=null&&<p className="text-sm font-bold text-white">{a.target_price_net.toFixed(2).replace('.',',')} €</p>}
                             {ppu&&<p className="text-[10px] text-emerald-400">{ppu.toFixed(4).replace('.',',')} €/{a.fill_unit}</p>}
                             <div className="flex gap-1 mt-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button onClick={()=>{setEditingVariant(a);setVariantForm({...EMPTY_VARIANT,total_fill_kg:a.fill_amount});setShowVariantModal(true)}}
+                              <button onClick={()=>{setEditingVariant(a);setVariantForm({...EMPTY_2K_VARIANT,total_fill_kg:a.fill_amount});setShowVariantModal(true)}}
                                 className="btn-ghost p-1"><Pencil size={11}/></button>
                               <button onClick={()=>unassignM.mutate(a.template_id)}
                                 className="btn-ghost p-1 text-red-400"><Trash2 size={11}/></button>

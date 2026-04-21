@@ -6,6 +6,7 @@ import {
   Store, Settings, ChevronUp, ChevronDown,
 } from 'lucide-react'
 import { useThemeStore, applyThemeToDom, type ThemeConfig } from '@/store/themeStore'
+import { ExternalThemesPanel } from './ExternalThemesPanel'
 
 // ── Mini UI helpers ────────────────────────────────────────────
 function SL({ icon, children }: { icon?: React.ReactNode; children: React.ReactNode }) {
@@ -322,6 +323,7 @@ export default function ThemeEditorPage() {
     { id:'bg',      label:'Hintergrund', icon:<Sun size={11}/> },
     { id:'presets', label:'Presets',     icon:<Sliders size={11}/> },
     { id:'widgets', label:'Widgets',     icon:<Layers size={11}/> },
+    { id:'externe', label:'Ext. Themes', icon:<Layers size={11}/> },
   ]
   const FONTS = ['Inter','Poppins','Roboto','DM Sans','Nunito','Manrope','Geist','Work Sans','Outfit','Space Grotesk','JetBrains Mono']
 
@@ -394,7 +396,7 @@ export default function ThemeEditorPage() {
 
       <div className="flex gap-5 items-start">
         {/* ── Editor Panel ── */}
-        <div className="w-72 shrink-0 flex flex-col overflow-hidden" style={{
+        <div className="w-80 shrink-0 flex flex-col overflow-hidden" style={{
           maxHeight:'80vh',
           background:'linear-gradient(160deg,rgba(0,0,0,0.65),rgba(8,6,20,0.85))',
           border:'1px solid rgba(255,255,255,0.08)',
@@ -403,8 +405,8 @@ export default function ThemeEditorPage() {
           boxShadow:'0 8px 40px rgba(0,0,0,0.5),inset 0 1px 0 rgba(255,255,255,0.06)',
         }}>
           {/* Tab bar */}
-          <div className="flex flex-wrap gap-1 p-2 shrink-0"
-            style={{ borderBottom:'1px solid rgba(255,255,255,0.06)', background:'linear-gradient(180deg,rgba(139,92,246,0.07),transparent)' }}>
+          <div className="flex gap-1 p-2 shrink-0 overflow-x-auto"
+            style={{ borderBottom:'1px solid rgba(255,255,255,0.06)', background:'linear-gradient(180deg,rgba(139,92,246,0.07),transparent)', scrollbarWidth:'none' }}>
             {TABS.map(tb => (
               <button key={tb.id} onClick={() => setTab(tb.id)}
                 className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold transition-all"
@@ -569,6 +571,12 @@ export default function ThemeEditorPage() {
 
             {/* WIDGETS */}
             {tab==='widgets'&&<WidgetManager/>}
+
+            {tab==='externe'&&(
+              <div className="px-1 pb-4">
+                <ExternalThemesPanel/>
+              </div>
+            )}
           </div>
 
           {/* Footer – Apply button */}
