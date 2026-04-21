@@ -73,7 +73,7 @@ function PackagingForm({initial,suppliers,categories,onSave,onClose,loading}:any
 export default function PackagingPage() {
   const qc=useQueryClient(); const toast=useToast()
   const [search,setSearch]=useState(''); const [type,setType]=useState('')
-  const [viewMode,setViewMode]=useState<'grid'|'list'>('grid')
+  const [viewMode,setViewMode]=useState<'grid'|'list'>('list')
   const [sortBy,setSortBy]=useState('name_asc')
   const [open,setOpen]=useState(false); const [editing,setEditing]=useState<PackagingItem|undefined>()
   const [deleting,setDeleting]=useState<PackagingItem|undefined>()
@@ -115,25 +115,44 @@ export default function PackagingPage() {
         sortOptions={SORT_OPTIONS} search={search} onSearch={setSearch} searchPlaceholder="Name, Code…"/>
       {/* Grid */}
       {viewMode==='grid'&&(!items.length?<div className="glass-card"><EmptyState icon={<Package size={40}/>} title="Keine Verpackungen" action={<Button icon={<Plus size={14}/>} onClick={()=>setOpen(true)}>Anlegen</Button>}/></div>:
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-          {items.map(i=>(
-            <div key={i.id} className="glass-card p-4 group hover:border-white/10 transition-all">
-              <div className="flex items-start justify-between mb-3">
-                <span className="text-3xl">{typeIcon(i.type)}</span>
-                <Badge variant={i.is_active?'green':'slate'}>{i.is_active?'Aktiv':'Inakt.'}</Badge>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+          {items.map(i=>{
+            const TYPE_COLORS: Record<string,string> = {
+              'flasche':'#8b5cf6','kanne':'#06b6d4','eimer':'#10b981','ibc':'#f59e0b',
+              'karton':'#ec4899','dose':'#ef4444','sack':'#a78bfa','default':'#6366f1'
+            }
+            const col = TYPE_COLORS[(i.type||'default').toLowerCase()] ?? TYPE_COLORS.default
+            return (
+            <div key={i.id} className="group cursor-pointer transition-all duration-200 hover:scale-[1.02]"
+              style={{background:`linear-gradient(135deg,${col}12,rgba(0,0,0,0.4))`,border:`1px solid ${col}25`,borderRadius:16,backdropFilter:'blur(20px)',boxShadow:`0 4px 24px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.06)`,padding:16,overflow:'hidden',position:'relative'}}>
+              {/* Shimmer top */}
+              <div style={{position:'absolute',top:0,left:0,right:0,height:1,background:`linear-gradient(90deg,transparent,${col}60,transparent)`}}/>
+              {/* Glowing icon */}
+              <div className="flex items-start justify-between mb-4">
+                <div style={{width:44,height:44,borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',background:`${col}20`,border:`1px solid ${col}40`,boxShadow:`0 0 20px ${col}30`,fontSize:22}}>
+                  {typeIcon(i.type)}
+                </div>
+                <div style={{width:8,height:8,borderRadius:'50%',background:i.is_active?'#10b981':'#475569',boxShadow:i.is_active?'0 0 8px #10b981':'none',marginTop:4}}/>
               </div>
-              <p className="text-sm font-bold text-slate-200 truncate">{i.name}</p>
-              <p className="text-xs text-slate-500 mb-2">{i.code}</p>
-              {i.volume_ml&&<p className="text-xs text-slate-400">{i.volume_ml} ml</p>}
-              {i.material_type&&<p className="text-xs text-slate-500">{i.material_type}{i.color?` · ${i.color}`:''}</p>}
-              <p className="text-sm font-bold text-brand-400 mt-2">{fmt(i.price_per_unit,i.currency)}</p>
-              <p className="text-xs text-slate-600">Min. {i.min_order_qty} Stk</p>
-              <div className="flex gap-1 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Button size="sm" variant="secondary" icon={<Pencil size={11}/>} onClick={()=>{setEditing(i);setOpen(true)}}>Edit</Button>
-                <button className="btn-ghost p-1.5 text-red-400" onClick={()=>setDeleting(i)}><Trash2 size={13}/></button>
+              {/* Info */}
+              <p className="text-sm font-bold truncate mb-0.5" style={{color:'white'}}>{i.name}</p>
+              <p className="text-[10px] font-mono mb-2" style={{color:'rgba(255,255,255,0.4)'}}>{i.code}</p>
+              {i.volume_ml&&<p className="text-xs mb-0.5" style={{color:'rgba(255,255,255,0.6)'}}>{i.volume_ml} ml</p>}
+              {i.material_type&&<p className="text-[10px] mb-2" style={{color:'rgba(255,255,255,0.4)'}}>{i.material_type}{i.color?` · ${i.color}`:''}</p>}
+              {/* Price */}
+              <div className="flex items-end justify-between mt-auto">
+                <div>
+                  <p className="text-xs font-mono font-bold" style={{color:col}}>{fmt(i.price_per_unit,i.currency)}</p>
+                  <p className="text-[10px]" style={{color:'rgba(255,255,255,0.3)'}}>Min. {i.min_order_qty} Stk</p>
+                </div>
+                {/* Hover actions */}
+                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button className="p-1.5 rounded-lg transition-all" style={{background:`${col}20`,color:col}} onClick={()=>{setEditing(i);setOpen(true)}}><Pencil size={11}/></button>
+                  <button className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/20 transition-all" onClick={()=>setDeleting(i)}><Trash2 size={11}/></button>
+                </div>
               </div>
             </div>
-          ))}
+          )})}
         </div>
       )}
       {/* Liste */}

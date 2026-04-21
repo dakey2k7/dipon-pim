@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import {
-  LayoutDashboard, Tag, FlaskConical, Truck, TrendingUp, FileText,
+  LayoutDashboard, Tag, FlaskConical, Truck, TrendingUp, FileText, Trash2, FolderOpen,
   Package, Box, Beaker, Layers, Calculator, Store, CreditCard,
   Users, Percent, Settings, ChevronLeft, ChevronRight, DollarSign, Shield,
 } from 'lucide-react'
@@ -11,9 +11,11 @@ import logoWhite from '@/assets/logo-white.png'
 function GlowIcon({ icon, color, active }: { icon: React.ReactNode; color: string; active: boolean }) {
   return (
     <span className="shrink-0 flex items-center justify-center" style={{
-      color: active ? color : undefined,
-      filter: active ? `drop-shadow(0 0 6px ${color})` : undefined,
-      transition: 'all 0.2s',
+      color: active ? color : `${color}b0`,
+      filter: active
+        ? `drop-shadow(0 0 8px ${color}) drop-shadow(0 0 4px ${color})`
+        : `drop-shadow(0 0 4px ${color}70)`,
+      transition: 'color 0.2s, filter 0.2s',
     }}>
       {icon}
     </span>
@@ -22,8 +24,8 @@ function GlowIcon({ icon, color, active }: { icon: React.ReactNode; color: strin
 
 const NAV_GROUPS = [
   { label:'Übersicht', items:[
-    { label:'Dashboard',        path:'/',              icon:<LayoutDashboard size={15}/>, color:'#8b5cf6' },
-    { label:'Kategorien',       path:'/categories',    icon:<Tag size={15}/>,             color:'#a78bfa' },
+    { label:'Dashboard',        path:'/',              icon:<LayoutDashboard size={15}/>, color:'#6366f1' },
+    { label:'Kategorien',       path:'/categories',    icon:<Tag size={15}/>,             color:'#818cf8' },
     { label:'Währungsrechner',  path:'/currency',      icon:<DollarSign size={15}/>,      color:'#06b6d4' },
     { label:'USt-ID Prüfung',   path:'/vat',           icon:<Shield size={15}/>,          color:'#10b981' },
     { label:'Szenarienrechner', path:'/scenario',      icon:<Calculator size={15}/>,      color:'#f59e0b' },
@@ -40,11 +42,14 @@ const NAV_GROUPS = [
     { label:'Etiketten',       path:'/labels',        icon:<Tag size={15}/>,             color:'#ec4899' },
   ]},
   { label:'Produkte', items:[
-    { label:'Produkte',        path:'/products',      icon:<Package size={15}/>,         color:'#8b5cf6' },
-    { label:'Rezepturen',      path:'/recipes',       icon:<Layers size={15}/>,          color:'#c4b5fd' },
+    { label:'Produkte',        path:'/products',      icon:<Package size={15}/>,         color:'#6366f1' },
+    { label:'Rezepturen',      path:'/recipes',       icon:<Layers size={15}/>,          color:'#818cf8' },
+     { label:'Varianten-Vorlagen', path:'/variant-templates', icon:<Tag size={15}/>, color:'#f59e0b' },
   ]},
   { label:'Kalkulation', items:[
-    { label:'Margenkalkulation',path:'/margins',      icon:<Calculator size={15}/>,      color:'#f59e0b' },
+    { label:'Systempreise',       path:'/system-prices',    icon:<TrendingUp size={15}/>, color:'#10b981' },
+     { label:'Papierkorb', path:'/trash', icon:<Trash2 size={15}/>, color:'#ef4444' },
+     { label:'Margenkalkulation',path:'/margins',      icon:<Calculator size={15}/>,      color:'#f59e0b' },
     { label:'Plattformprofile', path:'/platforms',    icon:<Store size={15}/>,           color:'#f97316' },
     { label:'Zahlungsprofile',  path:'/payments',     icon:<CreditCard size={15}/>,      color:'#10b981' },
     { label:'Kundengruppen',    path:'/customers',    icon:<Users size={15}/>,           color:'#06b6d4' },
@@ -91,18 +96,12 @@ export function Sidebar() {
           <div key={g.label}>
             {!sidebarCollapsed&&(
               <div className="flex items-center gap-2 px-2 mb-2 mt-1">
-                <div className="flex-1 h-px" style={{background:'linear-gradient(90deg, rgb(139 92 246 / 0.3), transparent)'}}/>
-                <span className="text-[9px] font-bold tracking-widest uppercase px-2 py-0.5 rounded-full select-none"
-                  style={{
-                    color:'rgb(220 220 255 / 0.7)',
-                    background:'rgb(139 92 246 / 0.08)',
-                    border:'1px solid rgb(139 92 246 / 0.15)',
-                    backdropFilter:'blur(8px)',
-                    textShadow:'0 0 10px rgb(167 139 250 / 0.8)',
-                  }}>
+                <div className="flex-1 h-px" style={{background:'linear-gradient(90deg, rgba(255,255,255,0.06), transparent)'}}/>
+                <span className="text-[9px] font-bold tracking-widest uppercase select-none"
+                  style={{color:'rgba(148,163,184,0.5)', letterSpacing:'0.12em'}}>
                   {g.label}
                 </span>
-                <div className="flex-1 h-px" style={{background:'linear-gradient(90deg, transparent, rgb(139 92 246 / 0.15))'}}/>
+                <div className="flex-1 h-px" style={{background:'linear-gradient(90deg, transparent, rgba(255,255,255,0.04)'}}/>
               </div>
             )}
             <div className="space-y-0.5">
@@ -111,14 +110,32 @@ export function Sidebar() {
                   className={({isActive})=>`nav-link ${isActive?'active':''} ${sidebarCollapsed?'justify-center px-0':''}`}
                   title={sidebarCollapsed?item.label:undefined}
                   style={({isActive})=>isActive?{
-                    borderColor:`${item.color}40`,
-                    background:`${item.color}15`,
-                    boxShadow:`0 0 16px ${item.color}20`,
-                  }:{}}>
+                    borderColor:`${item.color}50`,
+                    background:`linear-gradient(135deg, ${item.color}18, ${item.color}06)`,
+                    boxShadow:`0 0 18px ${item.color}30, 0 0 6px ${item.color}20, inset 0 1px 0 rgba(255,255,255,0.07)`,
+                  }:{}}
+                  onMouseEnter={e=>{
+                    const el=e.currentTarget
+                    if(!el.classList.contains('active')){
+                      el.style.borderColor=`${item.color}35`
+                      el.style.background=`${item.color}10`
+                      el.style.boxShadow=`0 0 12px ${item.color}20`
+                      el.style.transform='translateX(3px)'
+                    }
+                  }}
+                  onMouseLeave={e=>{
+                    const el=e.currentTarget
+                    if(!el.classList.contains('active')){
+                      el.style.borderColor=''
+                      el.style.background=''
+                      el.style.boxShadow=''
+                      el.style.transform=''
+                    }
+                  }}>
                   {({isActive})=>(
                     <>
-                      <GlowIcon icon={item.icon} color={item.color} active={isActive}/>
-                      {!sidebarCollapsed&&<span className="truncate">{item.label}</span>}
+                      <GlowIcon icon={item.icon} color={item.color} active={isActive||false}/>
+                      {!sidebarCollapsed&&<span className="truncate" style={{color:'rgba(255,255,255,0.88)',fontWeight:500}}>{item.label}</span>}
                     </>
                   )}
                 </NavLink>

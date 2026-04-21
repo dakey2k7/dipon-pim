@@ -7,11 +7,12 @@ import {
 import { Button }          from '@/components/ui/Input'
 import { Input, Select, Textarea } from '@/components/ui/Input'
 import { Modal }           from '@/components/ui/Modal'
-import { EmptyState, Spinner, ConfirmDialog, Badge } from '@/components/ui/Badge'
+import { EmptyState, Spinner, ConfirmDialog, Badge, SkeletonTable, SkeletonList } from '@/components/ui/Badge'
 import { ViewControls }    from '@/components/ui/ViewControls'
 import { FlagIcon }        from '@/components/ui/FlagImg'
 import { GhsBadges, GhsPicker } from '@/components/ui/GhsSymbol'
 import { useToast }        from '@/hooks/useToast'
+import { GlowCard }       from '@/components/ui/GlowCard'
 
 // ── Typen ─────────────────────────────────────────────────────
 interface Material {
@@ -128,15 +129,15 @@ function MaterialForm({initial,categories,suppliers,onSave,onClose,loading}:any)
     ghs_symbols: initial.ghs_symbols ? JSON.parse(initial.ghs_symbols||'[]') : [],
   } : EMPTY_FORM)
   const s=(k:keyof FormState,v:unknown)=>setF(p=>({...p,[k]:v}))
-  const [tab,setTab]=useState<'basis'|'preise'|'chemie'|'ghs'>('basis')
+  const [tab,setTab]=useState<'basis'|'preise'|'chemie'|'ghs'|'dokumente'>('basis')
   const toggleGhs=(g:string)=>setF(p=>({...p,ghs_symbols:p.ghs_symbols.includes(g)?p.ghs_symbols.filter(x=>x!==g):[...p.ghs_symbols,g]}))
 
-  const TABS=[{id:'basis',l:'Stammdaten'},{id:'preise',l:'Preise & Zuschläge'},{id:'chemie',l:'Chemie & Zoll'},{id:'ghs',l:'GHS & WGK'}]
+  const TABS=[{id:'basis',l:'Stammdaten'},{id:'preise',l:'Preise & Zuschläge'},{id:'chemie',l:'Chemie & Zoll'},{id:'ghs',l:'GHS & WGK'},{id:'dokumente',l:'Dokumente'}]
 
   return(
-    <div className="space-y-4">
+    <div className="space-y-4" style={{minHeight:440}}>
       {/* Tab-Leiste */}
-      <div className="flex rounded-xl overflow-hidden border border-white/8">
+      <div className="flex rounded-xl overflow-hidden" style={{background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.06)"}}>
         {TABS.map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id as typeof tab)}
             className={`flex-1 py-2 text-xs font-semibold transition-colors ${tab===t.id?'bg-brand-500/20 text-white':'text-slate-500 hover:text-slate-300'}`}>
@@ -172,7 +173,7 @@ function MaterialForm({initial,categories,suppliers,onSave,onClose,loading}:any)
 
       {/* Preise */}
       {tab==='preise'&&(
-        <div className="space-y-4">
+        <div className="space-y-4" style={{minHeight:440}}>
           <div>
             <p className="text-xs font-bold text-brand-400 uppercase tracking-wider mb-2">Gebindeart & Einkaufspreis</p>
             <div className="grid grid-cols-2 gap-3">
@@ -231,9 +232,17 @@ function MaterialForm({initial,categories,suppliers,onSave,onClose,loading}:any)
         </div>
       )}
 
+      {/* Dokumente */}
+      {tab==='dokumente'&&initial?.id&&(
+        <MaterialDocsTab materialId={initial.id}/>
+      )}
+      {tab==='dokumente'&&!initial?.id&&(
+        <p className="text-xs text-center py-4" style={{color:'var(--text-muted)'}}>Bitte zuerst den Rohstoff speichern</p>
+      )}
+
       {/* GHS & WGK */}
       {tab==='ghs'&&(
-        <div className="space-y-4">
+        <div className="space-y-4" style={{minHeight:440}}>
           <div>
             <p className="text-xs font-bold text-slate-300 mb-3">Wassergefährdungsklasse (WGK)</p>
             <div className="flex gap-2">
@@ -273,7 +282,71 @@ function MaterialForm({initial,categories,suppliers,onSave,onClose,loading}:any)
   )
 }
 
+
+// ── Dokumente-Tab für Rohstoffe ────────────────────────────────
+const DOC_CAT_OPTIONS = [
+  {id:'sicherheitsdatenblatt',label:'Sicherheitsdatenblatt',icon:'🛡️'},
+  {id:'rechnung',label:'Rechnung',icon:'🧾'},
+  {id:'zertifikat',label:'Zertifikat',icon:'🏆'},
+  {id:'technisch',label:'Technische Info',icon:'⚙️'},
+  {id:'lieferschein',label:'Lieferschein',icon:'📦'},
+  {id:'vertrag',label:'Vertrag',icon:'📄'},
+  {id:'other',label:'Sonstige',icon:'📁'},
+]
+function MaterialDocsTab({ materialId }:{ materialId:number }) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const { data:docs=[], isLoading } = useQuery<any[]>({
+    queryKey:['material-docs', materialId],
+    queryFn: ()=>(window.api as any).documents.list('material', materialId) as Promise<any[]>,
+  })
+  const [category, setCategory] = useState('sicherheitsdatenblatt')
+  const upload = async () => {
+    const r = await (window.api as any).documents.upload('material', materialId, { category })
+    if (r?.success) { qc.invalidateQueries({queryKey:['material-docs',materialId]}); qc.invalidateQueries({queryKey:['documents:all']}); toast.success('Dokument hochgeladen') }
+  }
+  const del = useMutation({
+    mutationFn:(id:number)=>(window.api as any).documents.purge(id),
+    onSuccess:()=>{ qc.invalidateQueries({queryKey:['material-docs',materialId]}); qc.invalidateQueries({queryKey:['documents:all']}) }
+  })
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <select value={category} onChange={e=>setCategory(e.target.value)}
+          className="flex-1 px-3 py-2 rounded-xl text-sm" style={{background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.1)',color:'var(--text-primary)'}}>
+          {DOC_CAT_OPTIONS.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+        </select>
+        <button onClick={upload} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold"
+          style={{background:'var(--accent)20',border:'1px solid var(--accent)40',color:'var(--text-primary)'}}>
+          <Upload size={12}/>Hochladen
+        </button>
+      </div>
+      {isLoading&&<p className="text-xs text-center py-3" style={{color:'var(--text-muted)'}}>Lädt…</p>}
+      {!isLoading&&!docs.length&&<p className="text-xs text-center py-4" style={{color:'var(--text-muted)'}}>Keine Dokumente</p>}
+      <div className="space-y-1.5">
+        {[...docs].sort((a,b)=>new Date(b.uploaded_at||0).getTime()-new Date(a.uploaded_at||0).getTime()).map((doc:any)=>(
+          <div key={doc.id} className="flex items-center justify-between p-2 rounded-xl group"
+            style={{background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.06)'}}>
+            <div className="flex items-center gap-2 min-w-0">
+              <FileText size={13} className="text-slate-500 shrink-0"/>
+              <div className="min-w-0">
+                <p className="text-xs font-medium truncate" style={{color:'var(--text-primary)'}}>{doc.original_name||doc.file_name}</p>
+                <p className="text-[10px]" style={{color:'var(--text-muted)'}}>{DOC_CAT_OPTIONS.find(c=>c.id===doc.category)?.label||'Sonstige'} · {doc.uploaded_at?new Date(doc.uploaded_at).toLocaleDateString('de-DE'):''}</p>
+              </div>
+            </div>
+            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+              <button onClick={()=>(window.api as any).documents.open(doc.id)} className="btn-ghost p-1 text-xs" style={{color:'var(--accent)'}}>Öffnen</button>
+              <button onClick={()=>del.mutate(doc.id)} className="btn-ghost p-1 text-red-400"><Trash2 size={11}/></button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Hauptseite ────────────────────────────────────────────────
+const CAT_COLORS:Record<number,string> = {1:'#8b5cf6',2:'#06b6d4',3:'#10b981',4:'#f59e0b',5:'#ec4899',6:'#ef4444',7:'#3b82f6',8:'#a78bfa'}
 export default function MaterialsPage() {
   const qc=useQueryClient(); const toast=useToast()
   const [search,setSearch]=useState(''); const [sortBy,setSortBy]=useState('name_asc')
@@ -327,7 +400,7 @@ export default function MaterialsPage() {
   const byType = useMemo(()=>{
     const map = new Map<string,Material[]>()
     for(const m of sorted){
-      const key=m.product_type||'Sonstige'
+      const key=(m as any).category_name||m.product_type||'Sonstige'
       map.set(key,[...(map.get(key)||[]),m])
     }
     return map
@@ -378,7 +451,14 @@ export default function MaterialsPage() {
     if(result.errors.length) toast.error(`${result.errors.length} Fehler beim Import`)
   }
 
-  if(isLoading) return <Spinner/>
+  if(isLoading) return (
+    <div>
+      <div className="page-header mb-4">
+        <div><div className="h-7 w-48 bg-white/5 rounded-lg animate-pulse"/><div className="h-3 w-24 bg-white/4 rounded mt-1 animate-pulse"/></div>
+      </div>
+      <SkeletonTable rows={8} cols={5}/>
+    </div>
+  )
 
   return(
     <div>
@@ -434,7 +514,7 @@ export default function MaterialsPage() {
         sortOptions={SORT_OPTIONS} search={search} onSearch={setSearch} searchPlaceholder="Name, CAS, Produktart…"/>
 
       {viewMode==='list'&&(
-        <div className="space-y-4">
+        <div className="space-y-4" style={{minHeight:440}}>
           {[...byType.entries()].map(([type,mats])=>(
             <div key={type}>
               <p className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-2 px-1">{type} ({mats.length})</p>
@@ -466,7 +546,7 @@ export default function MaterialsPage() {
                             <div className="flex items-center gap-2">
                               <FlaskConical size={13} className="text-brand-400 shrink-0"/>
                               <div>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <p className="text-sm font-semibold text-slate-200">{cheapest.name}</p>
                                   {hasMultiple&&(
                                     <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold"
@@ -475,18 +555,16 @@ export default function MaterialsPage() {
                                     </span>
                                   )}
                                 </div>
-                                {showLang==='de'&&cheapest.substance_name_de&&<p className="text-[10px] text-slate-500 truncate max-w-40">{cheapest.substance_name_de}</p>}
-                                {showLang==='en'&&cheapest.substance_name_en&&<p className="text-[10px] text-slate-500 truncate max-w-40">{cheapest.substance_name_en}</p>}
                               </div>
                             </div>
                           </td>
                           <td className="table-td">
-                            {cheapest.cas_number&&<p className="text-xs font-mono text-slate-300">{cheapest.cas_number}</p>}
-                            {cheapest.density&&<p className="text-[10px] text-slate-500">{cheapest.density}</p>}
+                            <p className="text-xs font-mono text-slate-400">{cheapest.cas_number||'–'}</p>
+                            {cheapest.density&&<p className="text-[10px] text-slate-600">{cheapest.density}</p>}
                           </td>
                           <td className="table-td text-slate-400 text-xs">
-                            <p>{cheapest.container_type}</p>
-                            <p className="text-slate-600">{cheapest.container_size}</p>
+                            {cheapest.container_type&&<span>{cheapest.container_type}{cheapest.container_size&&<span className="text-slate-600"> {cheapest.container_size}</span>}</span>}
+                            {!cheapest.container_type&&<span className="text-slate-700">–</span>}
                           </td>
                           <td className="table-td text-right">
                             {cheapest.price_per_kg_calc
@@ -595,24 +673,26 @@ export default function MaterialsPage() {
           {sorted.map(m=>{
             const ghs=JSON.parse(m.ghs_symbols||'[]') as string[]
             return(
-              <div key={m.id} className="glass-card p-4 group hover:border-white/10 transition-all">
-                <div className="flex items-start justify-between mb-2">
-                  <FlaskConical size={18} className="text-brand-400"/>
-                  <WgkBadge wgk={m.wgk||'-'}/>
-                </div>
-                <p className="text-sm font-bold text-slate-200 truncate">{m.name}</p>
-                {m.substance_name_de&&<p className="text-[10px] text-slate-500 truncate">{m.substance_name_de}</p>}
-                {m.cas_number&&<p className="text-xs font-mono text-slate-400 mt-1">{m.cas_number}</p>}
-                {m.density&&<p className="text-xs text-slate-500">{m.density}</p>}
-                <p className="text-xs text-slate-500 mt-1">{m.container_type} {m.container_size}</p>
-                {m.price_per_kg_calc&&<p className="text-sm font-bold text-brand-400 mt-2">{fmtEur(m.price_per_kg_calc)}/kg</p>}
-                {ghs.length>0&&<div className="mt-2"><GhsBadges symbols={ghs} size={28}/></div>}
-                <p className="text-xs text-slate-600 mt-1">{m.supplier_name||'–'}</p>
-                <div className="flex gap-1 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button size="sm" variant="secondary" icon={<Pencil size={11}/>} onClick={()=>{setEditing(m);setOpen(true)}}>Edit</Button>
-                  <button className="btn-ghost p-1.5 text-red-400" onClick={()=>setDeleting(m)}><Trash2 size={13}/></button>
-                </div>
-              </div>
+              <GlowCard
+                key={m.id}
+                color={m.category_id?(CAT_COLORS[m.category_id]||'#8b5cf6'):'#8b5cf6'}
+                icon={<FlaskConical size={20}/>}
+                isActive={!!m.is_active}
+                title={m.name}
+                subtitle={m.code}
+                onEdit={()=>{setEditing(m);setOpen(true)}}
+                onDelete={()=>setDeleting(m)}
+                badge={m.wgk&&m.wgk!=='-'?m.wgk:undefined}
+                meta={[
+                  ...(m.cas_number?[{label:'CAS',value:m.cas_number}]:[]),
+                  ...(m.container_type?[{label:'Gebinde',value:`${m.container_type} ${m.container_size||''}`}]:[]),
+                  ...(m.supplier_name?[{label:'Lieferant',value:m.supplier_name}]:[]),
+                ]}
+                highlight={m.price_per_kg_calc&&(
+                  <p style={{fontSize:16,fontWeight:800,color:'#a78bfa',fontFamily:'monospace'}}>{fmtEur(m.price_per_kg_calc)}<span style={{fontSize:11,color:'rgba(255,255,255,0.4)',fontWeight:400}}>/kg</span></p>
+                )}
+                footer={ghs.length>0?<GhsBadges symbols={ghs} size={24}/>:undefined}
+              />
             )
           })}
         </div>

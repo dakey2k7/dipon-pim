@@ -1,42 +1,125 @@
 import React, { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
 interface ModalProps {
   open: boolean; onClose: () => void; title?: string; subtitle?: string
   children: React.ReactNode; size?: 'sm'|'md'|'lg'|'xl'; footer?: React.ReactNode
 }
-const W: Record<string,string> = { sm:'max-w-md', md:'max-w-xl', lg:'max-w-2xl', xl:'max-w-4xl' }
+const W: Record<string, string> = {
+  sm: '420px', md: '560px', lg: '700px', xl: '900px'
+}
 
 export function Modal({ open, onClose, title, subtitle, children, size='md', footer }: ModalProps) {
   useEffect(() => {
     if (!open) return
-    const h = (e: KeyboardEvent) => { if (e.key==='Escape') onClose() }
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
+    // Prevent body scroll
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', h)
+      document.body.style.overflow = ''
+    }
   }, [open, onClose])
+
   if (!open) return null
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className={`relative w-full ${W[size]} glass-card border border-white/10
-        shadow-2xl flex flex-col max-h-[90vh]`}>
-        {(title||subtitle) && (
-          <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-white/5 shrink-0">
+
+  const modal = (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 99999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '5vh 5vw',
+      }}>
+      {/* Frosted backdrop */}
+      <div
+        onClick={onClose}
+        style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(4,6,14,0.6)',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+        }}/>
+
+      {/* Modal panel — responsive */}
+      <div
+        style={{
+          position: 'relative',
+          width: '100%',
+          maxWidth: W[size],
+          maxHeight: '88vh',
+          display: 'flex',
+          flexDirection: 'column',
+          background: 'rgba(8,11,24,0.92)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          borderRadius: 20,
+          backdropFilter: 'blur(32px)',
+          WebkitBackdropFilter: 'blur(32px)',
+          boxShadow: '0 32px 80px rgba(0,0,0,0.8), 0 0 40px rgba(70,130,255,0.06), inset 0 1px 0 rgba(255,255,255,0.07)',
+          overflow: 'hidden',
+          margin: 'auto',
+        }}>
+
+        {/* Shimmer top */}
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, height: 1,
+          background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.14), transparent)',
+          pointerEvents: 'none',
+        }}/>
+
+        {/* Header */}
+        {(title || subtitle) && (
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+            padding: '18px 24px 16px',
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
+            flexShrink: 0,
+          }}>
             <div>
-              {title    && <h2 className="text-lg font-bold text-slate-100">{title}</h2>}
-              {subtitle && <p className="text-sm text-slate-400 mt-0.5">{subtitle}</p>}
+              {title && <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: 'rgba(255,255,255,0.95)', lineHeight: 1.2 }}>{title}</h2>}
+              {subtitle && <p style={{ margin: '4px 0 0', fontSize: 13, color: 'rgba(255,255,255,0.45)' }}>{subtitle}</p>}
             </div>
-            <button onClick={onClose}
-              className="ml-4 p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-white/5 transition-colors shrink-0">
-              <X size={18} />
+            <button
+              onClick={onClose}
+              style={{
+                marginLeft: 16, padding: '6px 8px', borderRadius: 10, cursor: 'pointer',
+                background: 'transparent', border: '1px solid transparent',
+                color: 'rgba(255,255,255,0.4)', flexShrink: 0, display: 'flex',
+                transition: 'background 0.15s, color 0.15s',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.07)'; (e.currentTarget as HTMLElement).style.color = 'white' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.4)' }}>
+              <X size={18}/>
             </button>
           </div>
         )}
-        <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
+
+        {/* Content — scrollable */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+          {children}
+        </div>
+
+        {/* Footer */}
         {footer && (
-          <div className="px-6 pb-5 pt-4 border-t border-white/5 shrink-0 flex justify-end gap-3">{footer}</div>
+          <div style={{
+            padding: '14px 24px 18px',
+            borderTop: '1px solid rgba(255,255,255,0.06)',
+            flexShrink: 0,
+            display: 'flex', justifyContent: 'flex-end', gap: 10,
+          }}>
+            {footer}
+          </div>
         )}
       </div>
     </div>
   )
+
+  // Portal to document.body — bypasses ALL z-index stacking contexts
+  return createPortal(modal, document.body)
 }

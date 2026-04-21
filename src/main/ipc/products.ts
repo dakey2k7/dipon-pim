@@ -59,7 +59,7 @@ export function registerProductHandlers(): void {
       SELECT pm.*,
         m.name AS material_name, m.code AS material_code, m.unit AS material_unit,
         -- Bevorzugter Lieferantenpreis
-        sp_pref.price_per_unit AS pref_price, sp_pref.currency AS pref_currency,
+        COALESCE(sp_pref.price_per_unit, m.price_per_kg_calc) AS pref_price, sp_pref.currency AS pref_currency,
         s_pref.name AS pref_supplier_name, s_pref.id AS pref_supplier_id,
         -- Alle Lieferantenpreise als JSON
         (SELECT json_group_array(json_object(
@@ -109,25 +109,60 @@ export function registerProductHandlers(): void {
       d.yield_factor??1.0, d.overhead_factor??1.05,
       d.status||'active', d.notes||null, d.is_active??1
     )
-    return db.prepare('SELECT * FROM products WHERE id=?').get(r.lastInsertRowid)
+    const newProd = db.prepare('SELECT * FROM products WHERE id=?').get(r.lastInsertRowid) as any
+    logAction('CREATE', 'product', Number(r.lastInsertRowid), newProd?.name, {action:'Produkt angelegt'})
+    return newProd
   })
 
   ipcMain.handle('products:update', (_e, id: number, d: Record<string,unknown>) => {
     const db = getDb()
     db.prepare(`UPDATE products SET product_group_id=?,name=?,code=?,description=?,unit=?,
-      batch_size=?,batch_unit=?,yield_factor=?,overhead_factor=?,status=?,notes=?,
+      batch_size=?,batch_unit=?,yield_factor=?,overhead_factor=?,status=?,notes=?,ean=?,supplier_id=?,
       is_active=?,updated_at=datetime('now') WHERE id=?`).run(
       d.product_group_id||null, d.name, String(d.code||'').toUpperCase(),
       d.description||null, d.unit||'kg', d.batch_size??1000, d.batch_unit||'g',
       d.yield_factor??1.0, d.overhead_factor??1.05,
-      d.status||'active', d.notes||null, d.is_active??1, id
+      d.status||'active', d.notes||null, d.is_active??1,
+      d.ean||null, d.supplier_id||null, id
     )
     return db.prepare('SELECT * FROM products WHERE id=?').get(id)
   })
 
   ipcMain.handle('products:delete', (_e, id: number) => {
+    const db = getDb()
+    const prod = db.prepare('SELECT name FROM products WHERE id=?').get(id) as any
+    // Soft delete: move to trash
+    try {
+      db.prepare("UPDATE products SET is_active=0,status='deleted',updated_at=datetime('now') WHERE id=?").run(id)
+    } catch {
+      db.prepare('DELETE FROM products WHERE id=?').run(id)
+    }
+    logAction('DELETE', 'product', id, prod?.name, {action:'Produkt gelöscht'})
+    return { success: true }
+  })
+
+  ipcMain.handle('products:restore', (_e, id: number) => {
+    const db = getDb()
+    const prod = db.prepare('SELECT name FROM products WHERE id=?').get(id) as any
+    db.prepare("UPDATE products SET is_active=1,status='active',updated_at=datetime('now') WHERE id=?").run(id)
+    logAction('RESTORE', 'product', id, prod?.name, {action:'Produkt wiederhergestellt'})
+    return { success: true }
+  })
+
+  ipcMain.handle('products:permanentDelete', (_e, id: number) => {
     getDb().prepare('DELETE FROM products WHERE id=?').run(id)
     return { success: true }
+  })
+
+  ipcMain.handle('products:trash', () => {
+    return getDb().prepare(`
+      SELECT p.*, pg.name AS group_name, pg.color AS group_color,
+        (SELECT COUNT(*) FROM product_materials pm WHERE pm.product_id=p.id) AS material_count
+      FROM products p
+      LEFT JOIN product_groups pg ON pg.id=p.product_group_id
+      WHERE p.status='deleted' OR p.is_active=0
+      ORDER BY p.updated_at DESC
+    `).all()
   })
 
   // ── Produkt-Rohstoffe ──────────────────────────────────────

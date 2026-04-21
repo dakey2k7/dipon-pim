@@ -9,6 +9,13 @@ export default defineConfig({
     resolve: {
       alias: { '@main': resolve('src/main') },
     },
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'src/main/index.ts'),
+        },
+      },
+    },
   },
 
   // ── Preload Script ──────────────────────────────────────────

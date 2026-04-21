@@ -58,10 +58,10 @@ function LiveClock() {
   const time = new Intl.DateTimeFormat('de-DE',{hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(now)
   return (
     <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs select-none"
-      style={{background:'rgb(255 255 255 / 0.04)',border:'1px solid rgb(255 255 255 / 0.07)'}}>
-      <Clock size={12} className="text-brand-400 shrink-0"/>
-      <span className="text-slate-400 hidden lg:block">{date}</span>
-      <span className="text-slate-200 font-mono font-semibold">{time}</span>
+      style={{background:"rgba(10,15,35,0.8)",border:"1px solid rgba(70,130,255,0.25)",boxShadow:"0 0 20px rgba(70,130,255,0.15), 0 0 8px rgba(70,130,255,0.1)",backdropFilter:"blur(12px)"}}>
+      <Clock size={12} style={{color:"rgba(99,155,255,0.9)",filter:"drop-shadow(0 0 6px rgba(70,130,255,0.8))"}} className="shrink-0"/>
+      <span style={{color:"rgba(255,255,255,0.55)"}} className="hidden lg:block">{date}</span>
+      <span style={{color:"white",fontFamily:"monospace",fontWeight:700}} className="font-mono">{time}</span>
     </div>
   )
 }
@@ -101,7 +101,7 @@ function NotificationPanel({onClose}:{onClose:()=>void}) {
   }
   return (
     <div ref={ref} className="absolute right-0 top-12 w-80 rounded-2xl shadow-2xl z-50 overflow-hidden"
-      style={{background:'linear-gradient(135deg, #11142a 0%, #0e1124 100%)',border:'1px solid rgb(255 255 255 / 0.08)',boxShadow:'0 8px 40px rgb(0 0 0 / 0.5)'}}>
+      style={{background:'var(--bg-secondary)',border:'1px solid var(--border-color)',boxShadow:'0 8px 40px rgba(0,0,0,0.5)'}}>
       <div className="flex items-center justify-between px-4 py-3" style={{borderBottom:'1px solid rgb(255 255 255 / 0.06)'}}>
         <p className="text-sm font-bold text-white">Aktivitätslog</p>
         <button onClick={onClose} className="text-slate-500 hover:text-slate-200 transition-colors"><X size={14}/></button>
@@ -148,21 +148,21 @@ function ProfileDropdown({onClose}:{onClose:()=>void}) {
     return()=>document.removeEventListener('mousedown',h)
   },[onClose])
   return(
-    <div ref={ref} className="absolute right-0 top-12 w-72 rounded-2xl shadow-2xl z-50 overflow-hidden"
-      style={{background:'linear-gradient(135deg, #11142a 0%, #0e1124 100%)',border:'1px solid rgb(255 255 255 / 0.08)',boxShadow:'0 8px 40px rgb(0 0 0 / 0.5)'}}>
+    <div ref={ref} className="absolute right-0 top-12 w-72 rounded-2xl z-50 overflow-hidden"
+      style={{background:'rgba(8,11,24,0.95)',border:'1px solid rgba(70,130,255,0.25)',boxShadow:'0 16px 60px rgba(0,0,0,0.8), 0 0 20px rgba(70,130,255,0.15), 0 0 8px rgba(70,130,255,0.1)',backdropFilter:'blur(32px)',WebkitBackdropFilter:'blur(32px)'}}>
       {/* User Info */}
-      <div className="px-4 py-4" style={{borderBottom:'1px solid rgb(255 255 255 / 0.06)',background:'rgb(139 92 246 / 0.05)'}}>
+      <div className="px-4 py-4" style={{borderBottom:'1px solid rgb(255 255 255 / 0.06)',background:'rgba(70,130,255,0.06)'}}>
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-xl flex items-center justify-center text-lg font-black text-white"
-            style={{background:'linear-gradient(135deg, #7c3aed 0%, #4a57e5 100%)',boxShadow:'0 0 20px rgb(139 92 246 / 0.4)'}}>
+            style={{background:'linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%)',boxShadow:'0 0 24px rgba(70,130,255,0.5)',border:'2px solid rgba(70,130,255,0.25)'}}>
             D
           </div>
           <div>
             <p className="text-sm font-bold text-white">DIPON Administrator</p>
             <p className="text-xs text-slate-400">admin@dipon.de</p>
             <div className="flex items-center gap-1.5 mt-1">
-              <Shield size={10} className="text-brand-400"/>
-              <span className="text-[10px] font-semibold text-brand-400">Admin-Rolle</span>
+              <Shield size={10} style={{color:"rgba(99,155,255,0.9)",filter:"drop-shadow(0 0 4px rgba(70,130,255,0.6))"}}/>
+              <span className="text-[10px] font-semibold" style={{color:"rgba(99,155,255,0.9)"}}>Admin-Rolle</span>
               <span className="text-slate-600 mx-1">·</span>
               <span className="text-[10px] text-slate-500">DIPON PIM Studio</span>
             </div>
@@ -186,7 +186,7 @@ function ProfileDropdown({onClose}:{onClose:()=>void}) {
           <button key={i} className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl
             text-left hover:bg-white/5 transition-colors group">
             <div className="flex items-center gap-3">
-              <span className="text-brand-400">{item.icon}</span>
+              <span style={{color:"rgba(99,155,255,0.9)",filter:"drop-shadow(0 0 4px rgba(70,130,255,0.6))"}}>{item.icon}</span>
               <div>
                 <p className="text-sm text-slate-200">{item.label}</p>
                 <p className="text-[10px] text-slate-600">{item.sub}</p>
@@ -221,7 +221,7 @@ function TopBar() {
   return (
     <header className={`fixed top-0 right-0 h-16 z-30 flex items-center transition-all duration-200
       ${sidebarCollapsed?'left-16':'left-64'}`}
-      style={{background:'rgb(12 14 26 / 0.9)',borderBottom:'1px solid rgb(255 255 255 / 0.06)',backdropFilter:'blur(20px)'}}>
+      style={{background:'color-mix(in srgb, var(--bg-primary) 90%, transparent)',borderBottom:'1px solid var(--border-color)',backdropFilter:'blur(20px)'}}>
       <div className="flex items-center justify-between w-full px-6">
         <div>
           <h1 className="text-base font-bold text-white leading-none">{meta.title}</h1>
@@ -229,21 +229,21 @@ function TopBar() {
         </div>
         <div className="flex items-center gap-2">
           <LiveClock/>
-          <button className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-slate-400 hover:text-slate-200 text-sm transition-all"
-            style={{background:'rgb(255 255 255 / 0.04)',border:'1px solid rgb(255 255 255 / 0.07)'}}>
-            <Search size={13}/>
-            <span className="hidden sm:block text-xs">Suche …</span>
-            <kbd className="hidden sm:flex px-1.5 py-0.5 rounded text-[10px] text-slate-600"
-              style={{background:'rgb(255 255 255 / 0.04)',border:'1px solid rgb(255 255 255 / 0.07)'}}>Ctrl K</kbd>
+          <button className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm transition-all"
+            style={{background:'rgba(10,15,35,0.85)',border:'1px solid rgba(70,130,255,0.25)',boxShadow:'0 0 20px rgba(70,130,255,0.15), 0 0 8px rgba(70,130,255,0.1)',minWidth:220,backdropFilter:'blur(16px)',color:'rgba(255,255,255,0.5)'}}>
+            <Search size={13} style={{color:'rgba(255,255,255,0.35)'}}/>
+            <span className="flex-1 text-left text-sm">Suche …</span>
+            <kbd className="flex px-2 py-0.5 rounded text-[10px]"
+              style={{background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.08)',color:'rgba(255,255,255,0.3)'}}>Ctrl K</kbd>
           </button>
           <div className="relative">
             <button onClick={()=>setShowNotes(v=>!v)}
-              className="p-2 rounded-xl text-slate-400 hover:text-slate-200 transition-colors relative"
-              style={{background:'rgb(255 255 255 / 0.04)',border:'1px solid rgb(255 255 255 / 0.07)'}}>
+              className="p-2 rounded-xl transition-all relative"
+              style={{background:"rgba(10,15,35,0.8)",border:"1px solid rgba(70,130,255,0.25)",boxShadow:"0 0 20px rgba(70,130,255,0.15), 0 0 8px rgba(70,130,255,0.1)",color:"rgba(99,155,255,0.85)"}}>
               <Bell size={15}/>
               {auditCount>0&&(
                 <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold text-white"
-                  style={{background:'#8b5cf6',boxShadow:'0 0 8px #8b5cf6'}}>
+                  style={{background:'#6366f1',boxShadow:'0 0 8px #6366f1'}}>
                   {auditCount>9?'9+':auditCount}
                 </span>
               )}
@@ -253,7 +253,7 @@ function TopBar() {
           <div className="relative">
             <button onClick={()=>setShowProfile(v=>!v)}
               className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold text-white ml-1 cursor-pointer hover:scale-105 transition-transform"
-              style={{background:'linear-gradient(135deg, #7c3aed 0%, #4a57e5 100%)',border:'1px solid rgb(139 92 246 / 0.3)',boxShadow:'0 0 16px rgb(139 92 246 / 0.25)'}}>
+              style={{background:'linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%)',border:'2px solid rgba(70,130,255,0.25)',boxShadow:'0 0 20px rgba(70,130,255,0.4), 0 0 8px rgba(70,130,255,0.3)'}}>
               D
             </button>
             {showProfile&&<ProfileDropdown onClose={()=>setShowProfile(false)}/>}
@@ -267,13 +267,14 @@ function TopBar() {
 export function AppShell() {
   const {sidebarCollapsed}=useAppStore()
   return (
-    <div className="min-h-screen" style={{background:'var(--bg-app, #0c0e1a)'}}>
+    <div className="min-h-screen" style={{background:'#080b14'}}>
       <div className="fixed inset-0 pointer-events-none z-0" style={{background:`
-        radial-gradient(ellipse 60% 40% at 10% 0%, rgb(109 40 217 / 0.1) 0%, transparent 60%),
-        radial-gradient(ellipse 40% 30% at 90% 10%, rgb(96 116 241 / 0.06) 0%, transparent 50%)`}}/>
+        radial-gradient(ellipse 70% 55% at 0% 0%, rgba(16,28,60,0.9) 0%, transparent 65%),
+        radial-gradient(ellipse 50% 40% at 100% 100%, rgba(4,6,16,1) 0%, rgba(8,11,20,0.95) 100%),
+        linear-gradient(135deg, rgba(20,30,58,0.85) 0%, rgba(8,10,20,1) 60%, rgba(4,6,12,1) 100%)`}}/>
       <Sidebar/>
       <TopBar/>
-      <main className={`relative z-10 transition-all duration-200 pt-16 ${sidebarCollapsed?'pl-16':'pl-64'}`}>
+      <main className={`relative transition-all duration-200 pt-16 ${sidebarCollapsed?'pl-16':'pl-64'}`} style={{zIndex:1}}>
         <div className="p-6 min-h-[calc(100vh-64px)]"><Outlet/></div>
       </main>
       <ToastContainer/>

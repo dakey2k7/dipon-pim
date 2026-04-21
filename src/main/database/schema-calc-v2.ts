@@ -152,6 +152,7 @@ CREATE TABLE IF NOT EXISTS calculations (
 
 // Neue Spalten zu bestehenden Tabellen
 export const SCHEMA_CALC_V2_ALTER = [
+  'ALTER TABLE variant_templates ADD COLUMN group_name TEXT DEFAULT \'Größe\'', // Gruppe für Filterung
   // Gebinde: Artikelnummer + Tara-Gewicht + Deckel-Referenz
   "ALTER TABLE packaging_items ADD COLUMN article_number TEXT",
   "ALTER TABLE packaging_items ADD COLUMN tare_weight_g REAL DEFAULT 0",
@@ -160,3 +161,39 @@ export const SCHEMA_CALC_V2_ALTER = [
   "ALTER TABLE carton_items ADD COLUMN article_number TEXT",
   "ALTER TABLE carton_items ADD COLUMN supplier_id_2 INTEGER REFERENCES suppliers(id)",
 ]
+
+// Globale Varianten-Vorlagen
+export const SCHEMA_VARIANT_TEMPLATES = `
+CREATE TABLE IF NOT EXISTS variant_templates (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  name            TEXT    NOT NULL,
+  fill_amount     REAL    NOT NULL,
+  fill_unit       TEXT    NOT NULL DEFAULT 'kg',
+  ean             TEXT,
+  article_number  TEXT,
+  target_price_net REAL,
+  sort_order      INTEGER DEFAULT 0,
+  is_active       INTEGER DEFAULT 1,
+  created_at      TEXT    DEFAULT (datetime('now'))
+);
+
+-- Verknüpfung Produkt ↔ Varianten-Vorlage
+CREATE TABLE IF NOT EXISTS product_2k_variant_assignments (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_2k_id       INTEGER NOT NULL REFERENCES product_2k(id) ON DELETE CASCADE,
+  template_id         INTEGER NOT NULL REFERENCES variant_templates(id) ON DELETE CASCADE,
+  ean                 TEXT,
+  article_number      TEXT,
+  target_price_net    REAL,
+  packaging_a_id      INTEGER REFERENCES packaging_items(id),
+  lid_a_id            INTEGER REFERENCES lid_items(id),
+  packaging_b_id      INTEGER REFERENCES packaging_items(id),
+  lid_b_id            INTEGER REFERENCES lid_items(id),
+  label_a_id          INTEGER REFERENCES label_items(id),
+  carton_id           INTEGER REFERENCES carton_items(id),
+  units_per_carton    INTEGER DEFAULT 1,
+  extra_cost          REAL    DEFAULT 0,
+  is_active           INTEGER DEFAULT 1,
+  UNIQUE(product_2k_id, template_id)
+);
+`

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { FlaskConical, Plus, Trash2, Search, Package, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react'
+import { FlaskConical, Plus, Trash2, Search, Package, AlertCircle, ChevronDown, ChevronUp, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/Input'
 import { Input, Select } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
@@ -119,8 +119,10 @@ export default function RecipesPage() {
   const [filterGroup,setFilterGroup]=useState('')
   const [sortBy,setSortBy]=useState('name_asc')
   const [showNew,setShowNew]=useState(false)
+  const [showImport,setShowImport]=useState(false)   // ← war missing
   const [newForm,setNewForm]=useState({name:'',code:'',product_group_id:'',batch_size:1000,batch_unit:'g',overhead_factor:5,has_recipe:true})
   const [deleting,setDeleting]=useState<Product|undefined>()
+
   const {data:products=[],isLoading}=useQuery<Product[]>({queryKey:['products',search,filterGroup],queryFn:()=>window.api.products.list({search:search||undefined,group_id:filterGroup?Number(filterGroup):undefined}) as Promise<Product[]>})
   const {data:groups=[]}=useQuery<any[]>({queryKey:['product-groups'],queryFn:()=>window.api.productGroups.list() as Promise<any[]>})
   const sorted=([...products] as Product[]).sort((a,b)=>sortBy==='name_desc'?b.name.localeCompare(a.name):sortBy==='mats_desc'?(b.material_count??0)-(a.material_count??0):a.name.localeCompare(b.name))
@@ -129,37 +131,60 @@ export default function RecipesPage() {
   const deleteM=useMutation({mutationFn:(id:number)=>window.api.products.delete(id),onSuccess:()=>{inv();setDeleting(undefined);toast.success('Gelöscht')}})
   const withRecipe=sorted.filter(p=>(p.material_count??0)>0)
   const withoutRecipe=sorted.filter(p=>(p.material_count??0)===0)
+
   if(isLoading) return <Spinner/>
   return(
     <div>
       <div className="page-header">
-        <div><h2 className="page-title">Rezepturen & Komponenten</h2>
+        <div>
+          <h2 className="page-title">Rezepturen & Komponenten</h2>
           <p className="page-subtitle">{withRecipe.length} mit Rezept · {withoutRecipe.length} Einzelartikel</p>
         </div>
-        <Button icon={<Plus size={14}/>} onClick={()=>setShowNew(true)}>Produkt anlegen</Button>
+        <div className="flex gap-2">
+          <Button variant="secondary" icon={<Upload size={14}/>} onClick={()=>setShowImport(true)}>
+            Excel Import
+          </Button>
+          <Button icon={<Plus size={14}/>} onClick={()=>setShowNew(true)}>Produkt anlegen</Button>
+        </div>
       </div>
+
       <div className="flex gap-2 mb-4 flex-wrap">
-        <div className="relative flex-1 min-w-44"><Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"/>
-          <input className="form-input pl-9 w-full text-sm" placeholder="Suchen …" value={search} onChange={e=>setSearch(e.target.value)}/></div>
+        <div className="relative flex-1 min-w-44">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"/>
+          <input className="form-input pl-9 w-full text-sm" placeholder="Suchen …" value={search} onChange={e=>setSearch(e.target.value)}/>
+        </div>
         <select className="form-input w-44 text-sm" value={filterGroup} onChange={e=>setFilterGroup(e.target.value)}>
-          <option value="">Alle Gruppen</option>{groups.map((g:any)=><option key={g.id} value={g.id}>{g.name}</option>)}
+          <option value="">Alle Gruppen</option>
+          {groups.map((g:any)=><option key={g.id} value={g.id}>{g.name}</option>)}
         </select>
         <select className="form-input w-40 text-sm" value={sortBy} onChange={e=>setSortBy(e.target.value)}>
           {SORT.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </div>
-      {!sorted.length?<div className="glass-card p-12 text-center"><FlaskConical size={48} className="text-slate-700 mx-auto mb-4"/><p className="text-slate-500">Noch keine Produkte.<br/>Lege Produkte mit oder ohne Rezeptur an.</p><Button className="mt-4" icon={<Plus size={14}/>} onClick={()=>setShowNew(true)}>Erstes Produkt</Button></div>:(
-        <div className="space-y-4">
+
+      {!sorted.length
+        ?<div className="glass-card p-12 text-center">
+          <FlaskConical size={48} className="text-slate-700 mx-auto mb-4"/>
+          <p className="text-slate-500">Noch keine Produkte.<br/>Lege Produkte mit oder ohne Rezeptur an.</p>
+          <Button className="mt-4" icon={<Plus size={14}/>} onClick={()=>setShowNew(true)}>Erstes Produkt</Button>
+        </div>
+        :<div className="space-y-4">
           {withRecipe.length>0&&<div>
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-2 flex items-center gap-2"><FlaskConical size={11}/>Mit Rezeptur ({withRecipe.length})</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-2 flex items-center gap-2">
+              <FlaskConical size={11}/>Mit Rezeptur ({withRecipe.length})
+            </p>
             {withRecipe.map(p=><RecipeCard key={p.id} product={p}/>)}
           </div>}
           {withoutRecipe.length>0&&<div>
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-2 flex items-center gap-2"><Package size={11}/>Einzelartikel ohne Rezept ({withoutRecipe.length})</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-2 flex items-center gap-2">
+              <Package size={11}/>Einzelartikel ohne Rezept ({withoutRecipe.length})
+            </p>
             {withoutRecipe.map(p=><RecipeCard key={p.id} product={p}/>)}
           </div>}
         </div>
-      )}
+      }
+
+      {/* Modal: Neues Produkt */}
       <Modal open={showNew} onClose={()=>setShowNew(false)} title="Neues Produkt" size="md">
         <div className="space-y-4">
           <p className="text-xs text-slate-500 p-3 rounded-xl" style={{background:'rgb(139 92 246/0.08)',border:'1px solid rgb(139 92 246/0.2)'}}>
@@ -175,15 +200,22 @@ export default function RecipesPage() {
             ))}
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2"><Input label="Name *" value={newForm.name} autoFocus onChange={e=>setNewForm(f=>({...f,name:e.target.value,code:e.target.value.toUpperCase().replace(/\s+/g,'-').slice(0,12)}))}/></div>
+            <div className="col-span-2">
+              <Input label="Name *" value={newForm.name} autoFocus onChange={e=>setNewForm(f=>({...f,name:e.target.value,code:e.target.value.toUpperCase().replace(/\s+/g,'-').slice(0,12)}))}/>
+            </div>
             <Input label="Code *" value={newForm.code} onChange={e=>setNewForm(f=>({...f,code:e.target.value.toUpperCase()}))}/>
             <Select label="Gruppe" value={newForm.product_group_id} onChange={e=>setNewForm(f=>({...f,product_group_id:e.target.value}))}>
-              <option value="">– Keine –</option>{groups.map((g:any)=><option key={g.id} value={g.id}>{g.name}</option>)}
+              <option value="">– Keine –</option>
+              {groups.map((g:any)=><option key={g.id} value={g.id}>{g.name}</option>)}
             </Select>
-            {newForm.has_recipe&&<><Input label="Batch-Größe" type="number" value={newForm.batch_size} onChange={e=>setNewForm(f=>({...f,batch_size:Number(e.target.value)}))}/>
-              <Select label="Batch-Einheit" value={newForm.batch_unit} onChange={e=>setNewForm(f=>({...f,batch_unit:e.target.value}))}>
-                {['g','kg','ml','l'].map(u=><option key={u}>{u}</option>)}
-              </Select></>}
+            {newForm.has_recipe&&(
+              <>
+                <Input label="Batch-Größe" type="number" value={newForm.batch_size} onChange={e=>setNewForm(f=>({...f,batch_size:Number(e.target.value)}))}/>
+                <Select label="Batch-Einheit" value={newForm.batch_unit} onChange={e=>setNewForm(f=>({...f,batch_unit:e.target.value}))}>
+                  {['g','kg','ml','l'].map(u=><option key={u}>{u}</option>)}
+                </Select>
+              </>
+            )}
           </div>
           <div className="flex justify-end gap-3">
             <Button variant="secondary" onClick={()=>setShowNew(false)}>Abbrechen</Button>
@@ -194,6 +226,28 @@ export default function RecipesPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Modal: Excel Import */}
+      <Modal open={showImport} onClose={()=>setShowImport(false)} title="Rezepturen aus Excel importieren" size="md">
+        <div className="space-y-4">
+          <div className="p-4 rounded-xl text-center" style={{background:'rgb(59 130 246/0.05)',border:'2px dashed rgb(59 130 246/0.2)'}}>
+            <Upload size={32} className="text-blue-400 mx-auto mb-3"/>
+            <p className="text-sm font-semibold text-slate-200 mb-1">Excel-Datei hier ablegen oder klicken</p>
+            <p className="text-xs text-slate-500">Unterstützt: .xlsx, .xls</p>
+            <button className="mt-3 btn-primary text-sm px-4 py-2 rounded-lg">
+              Datei auswählen
+            </button>
+          </div>
+          <div className="p-3 rounded-xl" style={{background:'rgb(255 255 255/0.03)',border:'1px solid rgb(255 255 255/0.06)'}}>
+            <p className="text-xs font-semibold text-slate-400 mb-2">Erwartetes Format:</p>
+            <p className="text-xs text-slate-500">Spalte A: Rohstoff-Name · B: Menge · C: Einheit · D: Ausschuss %</p>
+          </div>
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={()=>setShowImport(false)}>Schließen</Button>
+          </div>
+        </div>
+      </Modal>
+
       <ConfirmDialog open={!!deleting} title="Löschen?" message={`"${deleting?.name}" löschen?`}
         onConfirm={()=>deleting&&deleteM.mutate(deleting.id)} onCancel={()=>setDeleting(undefined)} loading={deleteM.isPending}/>
     </div>

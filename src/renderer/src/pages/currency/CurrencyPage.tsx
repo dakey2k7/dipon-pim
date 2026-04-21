@@ -68,16 +68,22 @@ function InteractiveChart({history,base,target}:{history:Array<{date:string;rate
           </g>)
         })}
         <path d={`M ${pts.split(' ')[0]} ${pts.split(' ').slice(1).map(p=>`L ${p}`).join(' ')} L ${W-PX},${H} L ${PX},${H} Z`} fill="url(#cg)"/>
-        <polyline points={pts} fill="none" stroke={lc} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="3" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <polyline points={pts} fill="none" stroke={lc} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" filter="url(#glow)" style={{filter:`drop-shadow(0 0 6px ${lc})`}}/>
         {history.filter((_,i)=>i%labelStep===0||i===history.length-1).map(h=>{
           const idx=history.indexOf(h);const x=toX(idx)
           return <text key={idx} x={x} y={H+16} textAnchor="middle" fontSize="9" fill="#475569">{h.date.slice(5)}</text>
         })}
+        {/* Full-width invisible hover capture area */}
+        <rect x={PX} y={PY} width={W-PX*2} height={H-PY*2} fill="transparent" style={{cursor:'crosshair'}}/>
         {hover&&(<g>
-          <line x1={hover.x} y1={PY} x2={hover.x} y2={H} stroke="rgb(139 92 246 / 0.5)" strokeWidth="1" strokeDasharray="3,3"/>
+          <line x1={hover.x} y1={PY} x2={hover.x} y2={H} stroke={`${lc}80`} strokeWidth="1" strokeDasharray="3,3"/>
           <circle cx={hover.x} cy={hover.y} r="5" fill={lc} stroke="#0c0e1a" strokeWidth="2"/>
           <g transform={`translate(${Math.min(hover.x+8,W-125)},${Math.max(hover.y-40,2)})`}>
-            <rect width="118" height="40" rx="6" fill="#11142a" stroke="rgb(139 92 246 / 0.3)" strokeWidth="1"/>
+            <rect width="118" height="40" rx="8" fill="rgba(8,11,24,0.92)" stroke={`${lc}40`} strokeWidth="1"/>
             <text x="8" y="14" fontSize="9" fill="#94a3b8">{hover.date}</text>
             <text x="8" y="30" fontSize="12" fontWeight="700" fill="white" fontFamily="monospace">{hover.rate.toFixed(6)}</text>
           </g>

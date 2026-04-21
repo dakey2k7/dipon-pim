@@ -37,10 +37,37 @@ const DEFAULT:WS[]=[
 const STORE='dipon-dash-v8'
 const load=():WS[]=>{try{const s=localStorage.getItem(STORE);if(s)return JSON.parse(s)}catch{}return DEFAULT}
 function overlaps(a:WS,b:WS){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y}
+
+// Find first free position for a widget that doesn't overlap any existing widget
+function findFreePos(ws:WS[], moved:WS, cols:number): WS {
+  // Try the desired position first
+  const others = ws.filter(w=>w.i!==moved.i)
+  const test=(x:number,y:number)=>!others.some(o=>overlaps({...moved,x,y},o))
+
+  // Try exact position
+  if (test(moved.x, moved.y)) return moved
+
+  // Scan from desired Y upward first, then downward
+  for (let dy=0; dy<=50; dy++) {
+    for (const yOff of dy===0?[0]:[-dy, dy]) {
+      const ny = Math.max(0, moved.y + yOff)
+      // Try columns near desired X
+      for (let dx=0; dx<=cols; dx++) {
+        for (const xOff of dx===0?[0]:[-dx, dx]) {
+          const nx = Math.max(0, Math.min(cols - moved.w, moved.x + xOff))
+          if (test(nx, ny)) return {...moved, x:nx, y:ny}
+        }
+      }
+    }
+  }
+  // Fallback: append at bottom
+  const maxY = others.reduce((m,w)=>Math.max(m, w.y+w.h), 0)
+  return {...moved, y:maxY}
+}
+
 function resolve(ws:WS[],m:WS):WS[]{
-  let r=ws.map(w=>w.i===m.i?m:w)
-  for(let i=0;i<10;i++){let ch=false;for(const w of r){if(w.i===m.i)continue;if(overlaps(w,m)){r=r.map(x=>x.i===w.i?{...x,y:m.y+m.h}:x);ch=true}}if(!ch)break}
-  return r
+  const placed = findFreePos(ws, m, COLS)
+  return ws.map(w=>w.i===m.i?placed:w)
 }
 const fEur=(v:number)=>new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(v)
 const fmt4=(v:number)=>v.toFixed(4).replace('.',',')
@@ -201,7 +228,7 @@ function AlertsWidget(){
     <div className="h-full flex flex-col gap-2">
       {low>0&&<div className="flex gap-2 p-2 rounded-xl text-xs bg-amber-500/10 text-amber-400"><Zap size={11} className="shrink-0 mt-0.5"/>{low} unter Mindestbestand</div>}
       <div className="flex gap-2 p-2 rounded-xl text-xs text-emerald-400" style={{background:'rgb(16 185 129/0.08)'}}><Zap size={11} className="shrink-0 mt-0.5"/>Alle Lieferanten aktiv</div>
-      <div className="flex gap-2 p-2 rounded-xl text-xs bg-white/3 text-slate-400"><Zap size={11} className="shrink-0 mt-0.5"/>System laeuft normal</div>
+      <div className="flex gap-2 p-2 rounded-xl text-xs bg-white/3 text-slate-400"><Zap size={11} className="shrink-0 mt-0.5"/>System läuft normal</div>
     </div>
   )
 }
@@ -269,6 +296,7 @@ export default function Dashboard(){
     e.preventDefault()
     const r=ref.current!.getBoundingClientRect()
     setDrag({w,ox:e.clientX-r.left-w.x*(cellW+GAP),oy:e.clientY-r.top-w.y*(ROW_H+GAP)})
+    e.currentTarget.style.userSelect='none'
     setGhost(w)
   }
 
@@ -277,7 +305,9 @@ export default function Dashboard(){
     const mm=(e:MouseEvent)=>{
       const r=ref.current?.getBoundingClientRect();if(!r)return
       const{gx,gy}=pg(e.clientX-r.left-drag.ox,e.clientY-r.top-drag.oy)
-      setGhost({...drag.w,x:Math.max(0,Math.min(COLS-drag.w.w,gx)),y:Math.max(0,gy)})
+      const proposed={...drag.w,x:Math.max(0,Math.min(COLS-drag.w.w,gx)),y:Math.max(0,gy)}
+      const free=findFreePos(widgets,proposed,COLS)
+      setGhost(free)
     }
     const mu=(e:MouseEvent)=>{
       const r=ref.current?.getBoundingClientRect()
@@ -329,7 +359,7 @@ export default function Dashboard(){
           <div className="absolute rounded-2xl pointer-events-none"
             style={{left:ghost.x*(cellW+GAP),top:ghost.y*(ROW_H+GAP),
               width:ghost.w*(cellW+GAP)-GAP,height:ghost.h*(ROW_H+GAP)-GAP,
-              background:'rgb(139 92 246/0.08)',border:'2px dashed rgb(139 92 246/0.35)',zIndex:5}}/>
+              background:'rgba(99,102,241,0.08)',border:'2px dashed rgba(99,102,241,0.35)',zIndex:5}}/>
         )}
         {widgets.map(w=>{
           const d=CATALOG.find(c=>c.type===w.type);if(!d)return null
@@ -341,18 +371,23 @@ export default function Dashboard(){
               style={{
                 left:s.x*(cellW+GAP),top:s.y*(ROW_H+GAP),
                 width:w.w*(cellW+GAP)-GAP,height:w.h*(ROW_H+GAP)-GAP,
-                background:'rgba(17,20,42,0.85)',
-                border:`1px solid ${edit?d.color+'25':'rgba(255,255,255,0.06)'}`,
-                backdropFilter:'blur(16px)',
+                background:`linear-gradient(135deg, ${d.color}0d 0%, rgba(8,11,24,0.88) 100%)`,
+                border:`1px solid ${d.color}28`,
+                backdropFilter:'blur(24px)',
+                WebkitBackdropFilter:'blur(24px)',
+                boxShadow:`0 4px 24px rgba(0,0,0,0.5), 0 0 20px ${d.color}10, inset 0 1px 0 rgba(255,255,255,0.06)`,
                 transition:dg?'none':'left 0.15s ease,top 0.15s ease',
+                overflow:'hidden',
               }}>
+              {/* Shimmer top */}
+              <div style={{position:'absolute',top:0,left:0,right:0,height:1,background:`linear-gradient(90deg,transparent,${d.color}50,transparent)`,pointerEvents:'none'}}/>
               <div className={`flex items-center justify-between px-3 py-2 shrink-0 ${edit?'cursor-grab active:cursor-grabbing':''}`}
-                style={{borderBottom:'1px solid rgba(255,255,255,0.04)',minHeight:36}}
+                style={{borderBottom:`1px solid ${d.color}15`,minHeight:36,background:`${d.color}06`}}
                 onMouseDown={e=>onMD(e,w)}>
                 <div className="flex items-center gap-1.5">
                   {edit&&<GripHorizontal size={11} className="text-slate-700 shrink-0"/>}
-                  <span style={{fontSize:14}}>{d.icon}</span>
-                  <span className="text-xs font-semibold text-slate-300 truncate">{d.title}</span>
+                  <span style={{fontSize:14,filter:`drop-shadow(0 0 4px ${d.color})`}}>{d.icon}</span>
+                  <span className="text-xs font-semibold truncate" style={{color:'rgba(255,255,255,0.9)'}}>{d.title}</span>
                 </div>
                 {edit&&(
                   <button onClick={()=>save(widgets.filter(x=>x.i!==w.i))}
@@ -386,9 +421,15 @@ export default function Dashboard(){
               <div className="grid grid-cols-3 gap-3">
                 {CATALOG.map(c=>(
                   <button key={c.type}
-                    onClick={()=>{save([...widgets,{i:`${c.type}-${Date.now()}`,type:c.type,x:0,y:999,w:c.dW,h:c.dH}]);setCatalog(false)}}
-                    className="flex flex-col items-start gap-2 p-4 rounded-2xl text-left transition-all hover:scale-[1.03]"
-                    style={{background:`${c.color}0d`,border:`1px solid ${c.color}22`}}>
+                    onClick={()=>{
+                      // Find next free spot starting from y=0, scanning row by row
+                      const newW:WS={i:`${c.type}-${Date.now()}`,type:c.type,x:0,y:0,w:c.dW,h:c.dH}
+                      const placed=findFreePos(widgets,newW,COLS)
+                      save([...widgets,placed])
+                      setCatalog(false)
+                    }}
+                    className="flex flex-col items-start gap-2 p-4 rounded-2xl text-left transition-all hover:scale-[1.02]"
+                    style={{background:`linear-gradient(135deg,${c.color}12,rgba(8,11,24,0.9))`,border:`1px solid ${c.color}30`,backdropFilter:'blur(16px)',boxShadow:`0 0 16px ${c.color}10`}}>
                     <div className="w-9 h-9 rounded-xl flex items-center justify-center text-xl"
                       style={{background:`${c.color}20`}}>{c.icon}</div>
                     <p className="text-sm font-bold text-white">{c.title}</p>

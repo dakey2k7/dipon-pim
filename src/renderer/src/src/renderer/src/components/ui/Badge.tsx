@@ -8,6 +8,90 @@ export function Badge({ variant='slate', children, className='' }:
   return <span className={`badge-${variant} ${className}`}>{children}</span>
 }
 
+
+/* ── Skeleton ───────────────────────────────────────────────── */
+function SkeletonBase({ className='', style={} }: { className?:string; style?:React.CSSProperties }) {
+  return (
+    <div className={`animate-pulse rounded-lg ${className}`}
+      style={{background:'linear-gradient(90deg,rgba(255,255,255,0.04) 25%,rgba(255,255,255,0.08) 50%,rgba(255,255,255,0.04) 75%)',backgroundSize:'200% 100%',...style}}/>
+  )
+}
+
+export function SkeletonText({ lines=1, className='' }:{ lines?:number; className?:string }) {
+  return (
+    <div className={`space-y-2 ${className}`}>
+      {Array.from({length:lines}).map((_,i)=>(
+        <SkeletonBase key={i} className="h-3" style={{width: i===lines-1&&lines>1 ? '65%':'100%'}}/>
+      ))}
+    </div>
+  )
+}
+
+export function SkeletonCard({ className='' }:{ className?:string }) {
+  return (
+    <div className={`glass-card p-4 space-y-3 ${className}`}>
+      <div className="flex items-center gap-3">
+        <SkeletonBase className="w-8 h-8 rounded-xl shrink-0"/>
+        <div className="flex-1 space-y-2">
+          <SkeletonBase className="h-3 w-3/4"/>
+          <SkeletonBase className="h-2 w-1/2"/>
+        </div>
+      </div>
+      <SkeletonBase className="h-2"/>
+      <SkeletonBase className="h-2 w-4/5"/>
+    </div>
+  )
+}
+
+export function SkeletonTable({ rows=5, cols=4 }:{ rows?:number; cols?:number }) {
+  return (
+    <div className="glass-card overflow-hidden">
+      {/* Header */}
+      <div className="flex gap-4 px-4 py-3 border-b border-white/5">
+        {Array.from({length:cols}).map((_,i)=>(
+          <SkeletonBase key={i} className="h-2.5" style={{flex:i===0?2:1}}/>
+        ))}
+      </div>
+      {/* Rows */}
+      {Array.from({length:rows}).map((_,r)=>(
+        <div key={r} className="flex gap-4 px-4 py-3.5 border-b border-white/4">
+          {Array.from({length:cols}).map((_,c)=>(
+            <SkeletonBase key={c} className="h-3" style={{flex:c===0?2:1, opacity: 0.7+Math.random()*0.3}}/>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export function SkeletonKpi() {
+  return (
+    <div className="glass-card p-5 space-y-3">
+      <SkeletonBase className="h-2.5 w-20"/>
+      <SkeletonBase className="h-10 w-16"/>
+      <SkeletonBase className="h-2 w-24"/>
+    </div>
+  )
+}
+
+export function SkeletonList({ items=5 }:{ items?:number }) {
+  return (
+    <div className="space-y-2">
+      {Array.from({length:items}).map((_,i)=>(
+        <div key={i} className="flex items-center gap-3 p-3 rounded-xl"
+          style={{background:'rgba(255,255,255,0.02)',border:'1px solid rgba(255,255,255,0.05)'}}>
+          <SkeletonBase className="w-8 h-8 rounded-xl shrink-0"/>
+          <div className="flex-1 space-y-1.5">
+            <SkeletonBase className="h-3" style={{width:`${60+Math.random()*30}%`}}/>
+            <SkeletonBase className="h-2" style={{width:`${40+Math.random()*20}%`}}/>
+          </div>
+          <SkeletonBase className="h-3 w-16 shrink-0"/>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /* ── Card ───────────────────────────────────────────────────── */
 export function Card({ children, className='', hover=false, onClick, padding=true }:
   { children:React.ReactNode; className?:string; hover?:boolean; onClick?:()=>void; padding?:boolean }) {

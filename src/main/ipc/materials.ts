@@ -27,12 +27,21 @@ export function registerMaterialHandlers(): void {
     if (params.category_id) { sql += ' AND m.category_id = ?'; p.push(params.category_id) }
     if (params.low_stock)   { sql += ' AND m.current_stock <= m.min_stock' }
     sql += ' ORDER BY m.name ASC'
-    let rows = db.prepare(sql).all(...p)
-    // Supplier-Name aus supplier_id Spalte nachladen falls vorhanden
+    let rows: any[] = []
     try {
-      rows = (rows as any[]).map(r => {
-        if (!r.supplier_name && r.supplier_id) {
-          const sup = db.prepare('SELECT name FROM suppliers WHERE id=?').get(r.supplier_id) as any
+      rows = db.prepare(sql).all(...p) as any[]
+    } catch (e) {
+      // Fallback query without optional columns
+      const fallbackSql = sql.replace('m.supplier_id,', '').replace('m.container_type,', '').replace('m.container_size,', '').replace('m.price_per_kg_calc,', '')
+      try { rows = db.prepare(fallbackSql).all(...p) as any[] } catch {}
+    }
+    // Supplement supplier_name from direct supplier_id on material
+    try {
+      rows = rows.map((r:any) => {
+        if (!r.supplier_name) {
+          const sup = r.supplier_id
+            ? db.prepare('SELECT name FROM suppliers WHERE id=?').get(r.supplier_id) as any
+            : null
           return { ...r, supplier_name: sup?.name ?? null }
         }
         return r
@@ -114,14 +123,15 @@ export function registerMaterialHandlers(): void {
       UPDATE materials SET name=?,code=?,category_id=?,unit=?,density=?,description=?,
         cas_number=?,inci_name=?,min_stock=?,current_stock=?,safety_stock=?,
         storage_conditions=?,shelf_life_months=?,is_hazardous=?,is_active=?,
-        updated_at=datetime('now') WHERE id=?
+        supplier_id=?,updated_at=datetime('now') WHERE id=?
     `).run(
       String(d.name).trim(), String(d.code||'').trim().toUpperCase(),
       d.category_id||null, d.unit||'kg', d.density||null,
       d.description||null, d.cas_number||null, d.inci_name||null,
       d.min_stock??0, d.current_stock??0, d.safety_stock??0,
       d.storage_conditions||null, d.shelf_life_months||null,
-      d.is_hazardous?1:0, d.is_active??1, id
+      d.is_hazardous?1:0, d.is_active??1,
+      d.supplier_id?Number(d.supplier_id):null, id
     )
     return db.prepare('SELECT * FROM materials WHERE id = ?').get(id)
   })

@@ -2,6 +2,13 @@
  * Erweitertes Materialien-Schema v2 – einzelne ALTER TABLE Statements
  */
 export const SCHEMA_MATERIALS_V2_COLUMNS = [
+  // Supplier: bank + customer data
+  "ALTER TABLE suppliers ADD COLUMN iban TEXT",
+  "ALTER TABLE suppliers ADD COLUMN swift TEXT",
+  "ALTER TABLE suppliers ADD COLUMN bank_name TEXT",
+  "ALTER TABLE suppliers ADD COLUMN customer_number TEXT",
+  "ALTER TABLE suppliers ADD COLUMN fax TEXT",
+  "ALTER TABLE suppliers ADD COLUMN street TEXT",
   "ALTER TABLE materials ADD COLUMN substance_name_de TEXT",
   "ALTER TABLE materials ADD COLUMN substance_name_en TEXT",
   "ALTER TABLE materials ADD COLUMN density TEXT",

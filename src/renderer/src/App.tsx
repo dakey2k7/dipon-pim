@@ -17,6 +17,11 @@ import LabelsPage         from '@/pages/labels/LabelsPage'
 import CartonsPage        from '@/pages/cartons/CartonsPage'
 import { PlatformsPage, CustomersPage, DiscountsPage } from '@/pages/platforms/BusinessPages'
 import RecipesPage from '@/pages/recipes/RecipesPage'
+import SystempreisePage from '@/pages/systemprices/SystempreisePage'
+import DocumentsPage from '@/pages/documents/DocumentsPage'
+import TrashPage from '@/pages/trash/TrashPage'
+import ProductCreatePage from '@/pages/products/ProductCreatePage'
+import VariantTemplatesPage from '@/pages/variant-templates/VariantTemplatesPage'
 import { isElectron }     from '@/lib/api'
 import { useThemeStore, applyThemeToDom } from '@/store/themeStore'
 
@@ -67,6 +72,12 @@ export default function App() {
             <Route path="documents"     element={<PlaceholderPage title="Dokumentenablage"/>}/>
 
             <Route path="recipes"       element={<RecipesPage/>}/>
+            <Route path="system-prices"      element={<SystempreisePage/>}/>
+            <Route path="documents" element={<DocumentsPage/>}/>
+            <Route path="trash" element={<TrashPage/>}/>
+            <Route path="products/new"        element={<ProductCreatePage/>}/>
+            <Route path="products/edit/:id"    element={<ProductCreatePage/>}/>
+            <Route path="variant-templates" element={<VariantTemplatesPage/>}/>
             <Route path="settings"      element={<SettingsPage/>}/>
           </Route>
         </Routes>

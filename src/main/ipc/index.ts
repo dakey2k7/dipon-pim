@@ -5,7 +5,12 @@ import { registerPriceHistoryHandlers } from './price-history'
 import { registerDashboardHandlers }    from './dashboard'
 import { registerPackagingHandlers }    from './packaging'
 import { registerCalcHandlers }         from './calc'
+import { registerProductImageHandlers } from './product-images'
+import { registerExportImportHandlers } from './export-import'
+import { registerVariantTemplateHandlers } from './variant-templates'
+import { registerProducts2kHandlers } from './products2k'
 import { registerProductHandlers }      from './products'
+import { registerRecipesCsvHandlers }   from './recipes-csv'
 import { registerCurrencyHandlers }     from './currency'
 import { registerDocumentHandlers }     from './documents'
 import { registerAuditHandlers }        from './audit'
@@ -20,7 +25,12 @@ export function registerAllHandlers(): void {
   registerDashboardHandlers()
   registerPackagingHandlers()
   registerCalcHandlers()
+  registerProductImageHandlers()
+  registerExportImportHandlers()
+  registerVariantTemplateHandlers()
+  registerProducts2kHandlers()
   registerProductHandlers()
+  registerRecipesCsvHandlers()
   registerCurrencyHandlers()
   registerDocumentHandlers()
   registerAuditHandlers()

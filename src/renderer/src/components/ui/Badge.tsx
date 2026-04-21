@@ -8,6 +8,91 @@ export function Badge({ variant='slate', children, className='' }:
   return <span className={`badge-${variant} ${className}`}>{children}</span>
 }
 
+
+/* ── Skeleton ───────────────────────────────────────────────── */
+function SkeletonBase({ className='', style={} }: { className?:string; style?:React.CSSProperties }) {
+  return (
+    <div className={`animate-pulse rounded-lg ${className}`}
+      style={{background:'linear-gradient(90deg,rgba(255,255,255,0.04) 25%,rgba(255,255,255,0.08) 50%,rgba(255,255,255,0.04) 75%)',backgroundSize:'200% 100%',...style}}/>
+  )
+}
+
+export function SkeletonText({ lines=1, className='' }:{ lines?:number; className?:string }) {
+  return (
+    <div className={`space-y-2 ${className}`}>
+      {Array.from({length:lines}).map((_,i)=>(
+        <SkeletonBase key={i} className="h-3" style={{width: i===lines-1&&lines>1 ? '65%':'100%'}}/>
+      ))}
+    </div>
+  )
+}
+
+export function SkeletonCard({ className='' }:{ className?:string }) {
+  return (
+    <div className={`glass-card p-4 space-y-3 ${className}`}>
+      <div className="flex items-center gap-3">
+        <SkeletonBase className="w-8 h-8 rounded-xl shrink-0"/>
+        <div className="flex-1 space-y-2">
+          <SkeletonBase className="h-3 w-3/4"/>
+          <SkeletonBase className="h-2 w-1/2"/>
+        </div>
+      </div>
+      <SkeletonBase className="h-2"/>
+      <SkeletonBase className="h-2 w-4/5"/>
+    </div>
+  )
+}
+
+export function SkeletonTable({ rows=5, cols=4 }:{ rows?:number; cols?:number }) {
+  return (
+    <div className="glass-card overflow-hidden">
+      {/* Header */}
+      <div className="flex gap-4 px-4 py-3 border-b border-white/5">
+        {Array.from({length:cols}).map((_,i)=>(
+          <SkeletonBase key={i} className="h-2.5" style={{flex:i===0?2:1}}/>
+        ))}
+      </div>
+      {/* Rows */}
+      {Array.from({length:rows}).map((_,r)=>(
+        <div key={r} className="flex gap-4 px-4 py-3.5 border-b border-white/4">
+          {Array.from({length:cols}).map((_,c)=>(
+            <SkeletonBase key={c} className="h-3" style={{flex:c===0?2:1, opacity: 0.7+Math.random()*0.3}}/>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export function SkeletonKpi() {
+  return (
+    <div className="glass-card p-5 space-y-3">
+      <SkeletonBase className="h-2.5 w-20"/>
+      <SkeletonBase className="h-10 w-16"/>
+      <SkeletonBase className="h-2 w-24"/>
+    </div>
+  )
+  return createPortal(dialog, document.body)
+}
+
+export function SkeletonList({ items=5 }:{ items?:number }) {
+  return (
+    <div className="space-y-2">
+      {Array.from({length:items}).map((_,i)=>(
+        <div key={i} className="flex items-center gap-3 p-3 rounded-xl"
+          style={{background:'rgba(255,255,255,0.02)',border:'1px solid rgba(255,255,255,0.05)'}}>
+          <SkeletonBase className="w-8 h-8 rounded-xl shrink-0"/>
+          <div className="flex-1 space-y-1.5">
+            <SkeletonBase className="h-3" style={{width:`${60+Math.random()*30}%`}}/>
+            <SkeletonBase className="h-2" style={{width:`${40+Math.random()*20}%`}}/>
+          </div>
+          <SkeletonBase className="h-3 w-16 shrink-0"/>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /* ── Card ───────────────────────────────────────────────────── */
 export function Card({ children, className='', hover=false, onClick, padding=true }:
   { children:React.ReactNode; className?:string; hover?:boolean; onClick?:()=>void; padding?:boolean }) {
@@ -94,19 +179,21 @@ export function ConfirmDialog({ open, title, message, confirmLabel='Löschen', o
   { open:boolean; title:string; message:string; confirmLabel?:string;
     onConfirm:()=>void; onCancel:()=>void; loading?:boolean }) {
   if (!open) return null
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
-      <div className="relative glass-card border border-white/10 p-6 max-w-sm w-full shadow-2xl">
-        <h3 className="text-lg font-bold text-slate-100 mb-2">{title}</h3>
-        <p className="text-sm text-slate-400 mb-6">{message}</p>
-        <div className="flex gap-3 justify-end">
+  return createPortal(
+    <div style={{position:'fixed',inset:0,zIndex:99999,display:'flex',alignItems:'center',justifyContent:'center',padding:24}}>
+      <div style={{position:'fixed',inset:0,background:'rgba(4,6,14,0.6)',backdropFilter:'blur(16px)'}} onClick={onCancel}/>
+      <div style={{position:'relative',width:'100%',maxWidth:400,background:'rgba(8,11,24,0.92)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:20,backdropFilter:'blur(32px)',boxShadow:'0 32px 80px rgba(0,0,0,0.8)',padding:24,margin:'auto'}}>
+        <div style={{position:'absolute',top:0,left:0,right:0,height:1,background:'linear-gradient(90deg,transparent,rgba(255,255,255,0.12),transparent)',pointerEvents:'none'}}/>
+        <h3 style={{fontSize:17,fontWeight:800,color:'rgba(255,255,255,0.95)',marginBottom:8}}>{title}</h3>
+        <p style={{fontSize:13,color:'rgba(255,255,255,0.5)',marginBottom:24,lineHeight:1.5}}>{message}</p>
+        <div style={{display:'flex',gap:10,justifyContent:'flex-end'}}>
           <button className="btn-secondary" onClick={onCancel}>Abbrechen</button>
           <button className="btn-danger" onClick={onConfirm} disabled={loading}>
             {loading ? 'Wird gelöscht …' : confirmLabel}
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

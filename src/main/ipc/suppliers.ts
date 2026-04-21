@@ -40,13 +40,14 @@ export function registerSupplierHandlers(): void {
         (name,code,contact_person,email,phone,website,address,postal_code,
          city,country,tax_id,payment_terms,lead_time_days,currency,
          discount_percent,notes,is_active)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       String(d.name).trim(), String(d.code).trim().toUpperCase(),
       d.contact_person||null, d.email||null, d.phone||null, d.website||null,
       d.address||null, d.postal_code||null, d.city||null, d.country||'DE',
       d.tax_id||null, d.payment_terms??30, d.lead_time_days??14,
-      d.currency||'EUR', d.discount_percent??0, d.notes||null, d.is_active??1
+      d.currency||'EUR', d.discount_percent??0, d.notes||null, d.is_active??1,
+      d.iban??null, d.swift??null, d.bank_name??null, d.customer_number??null, d.fax??null, d.street??null
     )
     return db.prepare('SELECT * FROM suppliers WHERE id = ?').get(r.lastInsertRowid)
   })
@@ -58,13 +59,16 @@ export function registerSupplierHandlers(): void {
       UPDATE suppliers SET name=?,code=?,contact_person=?,email=?,phone=?,website=?,
         address=?,postal_code=?,city=?,country=?,tax_id=?,payment_terms=?,
         lead_time_days=?,currency=?,discount_percent=?,notes=?,is_active=?,
+        iban=?,swift=?,bank_name=?,customer_number=?,fax=?,street=?,
         updated_at=datetime('now') WHERE id=?
     `).run(
       String(d.name).trim(), String(d.code||'').trim().toUpperCase(),
       d.contact_person||null, d.email||null, d.phone||null, d.website||null,
       d.address||null, d.postal_code||null, d.city||null, d.country||'DE',
       d.tax_id||null, d.payment_terms??30, d.lead_time_days??14,
-      d.currency||'EUR', d.discount_percent??0, d.notes||null, d.is_active??1, id
+      d.currency||'EUR', d.discount_percent??0, d.notes||null, d.is_active??1,
+      d.iban??null, d.swift??null, d.bank_name??null, d.customer_number??null, d.fax??null, d.street??null,
+      id
     )
     return db.prepare('SELECT * FROM suppliers WHERE id = ?').get(id)
   })
