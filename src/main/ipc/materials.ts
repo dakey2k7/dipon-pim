@@ -133,6 +133,23 @@ export function registerMaterialHandlers(): void {
       d.is_hazardous?1:0, d.is_active??1,
       d.supplier_id?Number(d.supplier_id):null, id
     )
+    // Wenn supplier_id gesetzt: in supplier_prices diesen Lieferanten als preferred markieren
+    if (d.supplier_id) {
+      const supplierId = Number(d.supplier_id)
+      // Prüfen ob Preiseintrag für diesen Lieferanten existiert
+      const existing = db.prepare(
+        `SELECT id FROM supplier_prices WHERE material_id=? AND supplier_id=?`
+      ).get(id, supplierId)
+      if (existing) {
+        // Alle anderen auf nicht-preferred setzen, diesen auf preferred
+        db.prepare(`UPDATE supplier_prices SET is_preferred=0 WHERE material_id=?`).run(id)
+        db.prepare(`UPDATE supplier_prices SET is_preferred=1 WHERE material_id=? AND supplier_id=?`).run(id, supplierId)
+      }
+      // Falls kein Preiseintrag: zumindest alle anderen als nicht-preferred
+      else {
+        db.prepare(`UPDATE supplier_prices SET is_preferred=0 WHERE material_id=?`).run(id)
+      }
+    }
     return db.prepare('SELECT * FROM materials WHERE id = ?').get(id)
   })
 

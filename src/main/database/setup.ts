@@ -162,6 +162,14 @@ export function getDb(): Database.Database {
       upd.run(emoji, iso2)
     }
   } catch {}
+  // Migration: sort_order für Rezeptur-Reihenfolge
+  try {
+    _db.exec(`ALTER TABLE product_materials ADD COLUMN sort_order INTEGER DEFAULT 0`)
+  } catch {}
+  try {
+    // Bestehende Einträge mit sort_order initialisieren (nach id)
+    _db.exec(`UPDATE product_materials SET sort_order = id WHERE sort_order = 0 OR sort_order IS NULL`)
+  } catch {}
   if (isNew) {
     console.log('🌱 Neue DB …')
     _db.exec(SEED_SQL)

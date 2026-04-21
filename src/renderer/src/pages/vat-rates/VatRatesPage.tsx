@@ -10,6 +10,7 @@ import {
 import { Button, Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
 import { useToast } from '@/hooks/useToast'
+import { FlagIcon } from '@/components/ui/FlagImg'
 import { Spinner } from '@/components/ui/Badge'
 
 type Region = 'all' | 'eu' | 'eea' | 'other'
@@ -227,7 +228,7 @@ export default function VatRatesPage() {
                 onClick={() => toggle(c.iso2)}>
                 {/* Land + Flagge */}
                 <div className="flex items-center gap-2.5">
-                  <span className="text-xl leading-none shrink-0">{c.flag_emoji || '🏳'}</span>
+                  <FlagIcon code={c.iso2} size="md"/>
                   <div>
                     <p className="text-sm font-semibold text-white">{c.name_de}</p>
                     <p className="text-[10px] font-mono text-slate-500">{c.iso2}</p>

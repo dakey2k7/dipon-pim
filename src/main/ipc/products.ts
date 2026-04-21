@@ -164,6 +164,32 @@ export function registerProductHandlers(): void {
     return db.prepare('SELECT * FROM products WHERE id=?').get(id)
   })
 
+  
+  // ── Reihenfolge tauschen (↑ / ↓) ──────────────────────────
+  ipcMain.handle('products:reorderMaterial', (_e, productId: number, matId: number, direction: 'up' | 'down') => {
+    const db = getDb()
+    const mats = db.prepare(
+      `SELECT id, COALESCE(sort_order, id) AS ord
+       FROM product_materials
+       WHERE product_id=? AND is_active!=0
+       ORDER BY COALESCE(sort_order, id), id`
+    ).all(productId) as { id: number; ord: number }[]
+
+    const idx = mats.findIndex(m => m.id === matId)
+    if (idx < 0) return { ok: false, reason: 'not found' }
+
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+    if (swapIdx < 0 || swapIdx >= mats.length) return { ok: false, reason: 'boundary' }
+
+    const a = mats[idx]
+    const b = mats[swapIdx]
+
+    db.prepare(`UPDATE product_materials SET sort_order=? WHERE id=?`).run(b.ord, a.id)
+    db.prepare(`UPDATE product_materials SET sort_order=? WHERE id=?`).run(a.ord, b.id)
+
+    return { ok: true }
+  })
+
   ipcMain.handle('products:delete', (_e, id: number) => {
     const db = getDb()
     const prod = db.prepare('SELECT name FROM products WHERE id=?').get(id) as any

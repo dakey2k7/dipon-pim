@@ -11,6 +11,7 @@ import { Button, Input } from '@/components/ui/Input'
 import { Modal }   from '@/components/ui/Modal'
 import { ConfirmDialog, Spinner } from '@/components/ui/Badge'
 import { useToast } from '@/hooks/useToast'
+import { FlagIcon } from '@/components/ui/FlagImg'
 
 // ── Carrier-Logo SVG (Markenfarben) ───────────────────────────
 function CarrierLogo({ name, code, color, size = 32 }: {
@@ -149,7 +150,7 @@ function CountrySelector({ zoneId, allCountries, currentIsos, onSave, onCancel }
         </p>
         <div className="relative w-48">
           <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500"/>
-          <input className="form-input pl-8 text-xs w-full" placeholder="Land suchen …"
+          <input className="form-input pl-9 text-xs w-full" placeholder="   Land suchen …"
             value={search} onChange={e => setSearch(e.target.value)}/>
         </div>
       </div>
@@ -295,7 +296,7 @@ function ZonePanel({ zone, allCountries, onDelete }: {
             </p>
             {/* Flaggen-Preview */}
             {(zoneCountries as any[]).slice(0,8).map((c: any) => (
-              <span key={c.iso2} title={c.name_de} className="text-base leading-none">{c.flag_emoji || c.iso2}</span>
+              <FlagIcon key={c.iso2} code={c.iso2} size="sm" title={c.name_de}/>
             ))}
             {(zoneCountries as any[]).length > 8 && (
               <span className="text-[10px] text-slate-600">+{(zoneCountries as any[]).length - 8}</span>

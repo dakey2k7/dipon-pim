@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, Pencil, Trash2, Search, FlaskConical,
@@ -348,6 +349,8 @@ function MaterialDocsTab({ materialId }:{ materialId:number }) {
 // ── Hauptseite ────────────────────────────────────────────────
 const CAT_COLORS:Record<number,string> = {1:'#8b5cf6',2:'#06b6d4',3:'#10b981',4:'#f59e0b',5:'#ec4899',6:'#ef4444',7:'#3b82f6',8:'#a78bfa'}
 export default function MaterialsPage() {
+  const location    = useLocation()
+  const highlightId = (location.state as any)?.highlightId as number | undefined
   const qc=useQueryClient(); const toast=useToast()
   const [search,setSearch]=useState(''); const [sortBy,setSortBy]=useState('name_asc')
   const [viewMode,setViewMode]=useState<'grid'|'list'>('list')

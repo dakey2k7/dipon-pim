@@ -152,6 +152,7 @@ const api = {
     delete:         (id: number)              => ipcRenderer.invoke('products:delete', id),
     saveMaterial:   (pid: number, d: unknown) => ipcRenderer.invoke('products:saveMaterial', pid, d),
     deleteMaterial: (pid: number, mid: number) => ipcRenderer.invoke('products:deleteMaterial', pid, mid),
+      reorderMaterial: (productId: number, matId: number, dir: 'up' | 'down') => ipcRenderer.invoke('products:reorderMaterial', productId, matId, dir),
     saveVariant:    (pid: number, d: unknown) => ipcRenderer.invoke('products:saveVariant', pid, d),
     deleteVariant:  (pid: number, vid: number) => ipcRenderer.invoke('products:deleteVariant', pid, vid),
     restore:        (id: number)              => ipcRenderer.invoke('products:restore', id),
