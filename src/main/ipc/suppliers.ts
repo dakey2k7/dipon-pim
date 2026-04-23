@@ -153,7 +153,7 @@ ipcMain.handle('suppliers:deleteCondition', (_e, condId: number) => {
           m.deposit_note
         FROM materials m
         LEFT JOIN supplier_prices sp ON sp.material_id = m.id AND sp.supplier_id = ?
-        WHERE m.supplier_id = ? OR (sp.supplier_id = ? AND sp.is_preferred = 1)
+        WHERE (m.supplier_id = ? OR (sp.supplier_id = ? AND sp.is_preferred = 1)) AND m.is_active = 1
         ORDER BY m.product_type ASC, m.name ASC
       `).all(supplierId, supplierId, supplierId)
     } catch (e) {

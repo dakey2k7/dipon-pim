@@ -69,6 +69,8 @@ export function registerProductHandlers(): void {
     const materials = db.prepare(`
       SELECT pm.*,
         m.name AS material_name, m.code AS material_code, m.unit AS material_unit,
+        m.product_type AS material_category,
+        cat.name AS category_name,
         COALESCE(
           sp_pref.price_per_unit,
           (SELECT sp2.price_per_unit FROM supplier_prices sp2
@@ -80,8 +82,10 @@ export function registerProductHandlers(): void {
                ELSE NULL END
         ) AS pref_price,
         COALESCE(sp_pref.currency, 'EUR') AS pref_currency,
-        s_pref.name AS pref_supplier_name,
-        s_pref.id   AS pref_supplier_id,
+        COALESCE(s_pref.name,
+          (SELECT name FROM suppliers WHERE id=m.supplier_id)
+        ) AS pref_supplier_name,
+        COALESCE(s_pref.id, m.supplier_id) AS pref_supplier_id,
         (SELECT json_group_array(json_object(
           'supplier_id',   sp2.supplier_id,
           'supplier_name', s2.name,
@@ -96,10 +100,11 @@ export function registerProductHandlers(): void {
         ) AS all_prices_json
       FROM product_materials pm
       JOIN materials m ON m.id=pm.material_id
+      LEFT JOIN categories cat ON cat.id = m.category_id
       LEFT JOIN supplier_prices sp_pref ON sp_pref.material_id=m.id AND sp_pref.is_preferred=1
       LEFT JOIN suppliers s_pref ON s_pref.id=sp_pref.supplier_id
       WHERE pm.product_id=?
-      ORDER BY pm.sort_order
+      ORDER BY COALESCE(pm.sort_order, pm.id), pm.id
     `).all(id)
 
     // Varianten
@@ -161,6 +166,43 @@ export function registerProductHandlers(): void {
     return db.prepare('SELECT * FROM products WHERE id=?').get(id)
   })
 
+  
+  // ── Reihenfolge tauschen (↑ / ↓) ──────────────────────────
+  ipcMain.handle('products:reorderMaterial', (_e, productId: number, matId: number, direction: 'up' | 'down') => {
+    const db = getDb()
+
+    // Step 1: Normalize ALL sort_orders for this product (sequential, no gaps, no ties)
+    const normalize = db.transaction(() => {
+      const rows = db.prepare(
+        `SELECT id FROM product_materials WHERE product_id=? ORDER BY COALESCE(sort_order,99999), id`
+      ).all(productId) as { id: number }[]
+      rows.forEach((r, i) => {
+        db.prepare(`UPDATE product_materials SET sort_order=? WHERE id=?`).run(i * 10, r.id)
+      })
+      return rows
+    })()
+
+    // Step 2: Re-read clean sorted list
+    const mats = db.prepare(
+      `SELECT id, sort_order AS ord FROM product_materials
+       WHERE product_id=? ORDER BY sort_order, id`
+    ).all(productId) as { id: number; ord: number }[]
+
+    const idx = mats.findIndex(m => m.id === matId)
+    if (idx < 0) return { ok: false, reason: 'not found' }
+
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+    if (swapIdx < 0 || swapIdx >= mats.length) return { ok: false, reason: 'boundary' }
+
+    const a = mats[idx]
+    const b = mats[swapIdx]
+
+    db.prepare(`UPDATE product_materials SET sort_order=? WHERE id=?`).run(b.ord, a.id)
+    db.prepare(`UPDATE product_materials SET sort_order=? WHERE id=?`).run(a.ord, b.id)
+
+    return { ok: true }
+  })
+
   ipcMain.handle('products:delete', (_e, id: number) => {
     const db = getDb()
     const prod = db.prepare('SELECT name FROM products WHERE id=?').get(id) as any
@@ -201,10 +243,15 @@ export function registerProductHandlers(): void {
   ipcMain.handle('products:saveMaterial', (_e, productId: number, d: Record<string,unknown>) => {
     const db = getDb()
     if (d.id) {
+      // Aktuellen sort_order lesen (nie überschreiben wenn nicht explizit übergeben)
+      const currentRow = db.prepare(
+        `SELECT sort_order FROM product_materials WHERE id=? AND product_id=?`
+      ).get(d.id, productId) as { sort_order: number } | undefined
+      const keepOrder = d.sort_order !== undefined ? d.sort_order : (currentRow?.sort_order ?? 0)
       db.prepare(`UPDATE product_materials SET material_id=?,quantity=?,unit=?,
         waste_factor=?,sort_order=?,notes=? WHERE id=? AND product_id=?`).run(
         d.material_id, d.quantity, d.unit||'g',
-        d.waste_factor??0, d.sort_order??0, d.notes||null, d.id, productId)
+        d.waste_factor??0, keepOrder, d.notes||null, d.id, productId)
     } else {
       const maxOrder = (db.prepare(
         'SELECT MAX(sort_order) AS m FROM product_materials WHERE product_id=?'
@@ -246,11 +293,17 @@ export function registerProductHandlers(): void {
         d.packaging_item_id||null, Number(d.packaging_quantity)||1, d.label_item_id||null, d.carton_item_id||null,
         d.units_per_carton??1, d.extra_cost??0, d.extra_cost_note||null, d.status||'active')
     }
+    const prod = db.prepare('SELECT name FROM products WHERE id=?').get(productId) as any
+    logAction('update', 'product', productId, prod?.name, { action: d.id ? 'Variante aktualisiert' : 'Variante angelegt', variant: d.name })
     return { success: true }
   })
 
   ipcMain.handle('products:deleteVariant', (_e, productId: number, variantId: number) => {
-    getDb().prepare('DELETE FROM product_variants WHERE id=? AND product_id=?').run(variantId, productId)
+    const db2 = getDb()
+    const vari = db2.prepare('SELECT name, product_id FROM product_variants WHERE id=?').get(variantId) as any
+    const prod2 = db2.prepare('SELECT name FROM products WHERE id=?').get(productId) as any
+    db2.prepare('DELETE FROM product_variants WHERE id=? AND product_id=?').run(variantId, productId)
+    logAction('delete', 'product', productId, prod2?.name, { action: 'Variante gelöscht', variant: vari?.name })
     return { success: true }
   })
 
@@ -291,6 +344,7 @@ export function registerProductHandlers(): void {
         COALESCE(sp_pref.currency, 'EUR') AS currency
       FROM product_materials pm
       JOIN materials m ON m.id=pm.material_id
+      LEFT JOIN categories cat ON cat.id = m.category_id
       LEFT JOIN supplier_prices sp_pref ON sp_pref.material_id=m.id AND sp_pref.is_preferred=1
       WHERE pm.product_id=?
       ORDER BY pm.sort_order

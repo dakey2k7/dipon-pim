@@ -1,5 +1,5 @@
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, Pencil, Trash2, Search, FlaskConical,
@@ -108,26 +108,19 @@ function MaterialForm({initial,categories,suppliers,onSave,onClose,loading}:any)
     substance_name_en:initial.substance_name_en||'',
     density:initial.density||'',cas_number:initial.cas_number||'',
     eg_number:initial.eg_number||'',reach_number:initial.reach_number||'',
-    container_type:initial._isNewSupplierPrice ? '' : initial.container_type||'',container_size:initial.container_size||'',
-    base_price:String(initial._isNewSupplierPrice ? '' : (initial.base_price||'')),
+    container_type:initial.container_type||'',container_size:initial.container_size||'',
+    base_price:String(initial.base_price||''),
     base_quantity:String(initial.base_quantity||1),
     base_unit:initial.base_unit||'kg',
-    surcharge_energy:initial._isNewSupplierPrice ? '' : String(initial.surcharge_energy||''),
-    surcharge_energy_unit:initial._isNewSupplierPrice ? '' : initial.surcharge_energy_unit||'100 kg',
-    surcharge_adr:initial._isNewSupplierPrice ? '' : String(initial.surcharge_adr||''),
-    surcharge_adr_unit:initial._isNewSupplierPrice ? '' : initial.surcharge_adr_unit||'100 kg',
+    surcharge_energy:String(initial.surcharge_energy||''),
+    surcharge_energy_unit:initial.surcharge_energy_unit||'100 kg',
+    surcharge_adr:String(initial.surcharge_adr||''),
+    surcharge_adr_unit:initial.surcharge_adr_unit||'100 kg',
     product_type:initial.product_type||'',
     category_id:String(initial.category_id||''),
-    supplier_id:String(initial._isNewSupplierPrice ? '' : (
-      initial.supplier_id ||
-      // Fallback: bevorzugter Lieferant aus supplier_prices JOIN
-      initial.preferred_supplier_id ||
-      // Fallback: erster Eintrag aus _allPrices
-      (initial._allPrices?.[0]?.supplier_id) ||
-      ''
-    )),
-    deposit_amount:initial._isNewSupplierPrice ? '' : String(initial.deposit_amount||''),
-    deposit_note:initial._isNewSupplierPrice ? '' : initial.deposit_note||'',
+    supplier_id:String(initial.supplier_id||''),
+    deposit_amount:String(initial.deposit_amount||''),
+    deposit_note:initial.deposit_note||'',
     wgk:initial.wgk||'-',
     valid_from:initial.valid_from||'',
     notes:initial.notes||'',
@@ -137,9 +130,7 @@ function MaterialForm({initial,categories,suppliers,onSave,onClose,loading}:any)
     ghs_symbols: initial.ghs_symbols ? JSON.parse(initial.ghs_symbols||'[]') : [],
   } : EMPTY_FORM)
   const s=(k:keyof FormState,v:unknown)=>setF(p=>({...p,[k]:v}))
-  const [tab,setTab]=useState<'basis'|'preise'|'chemie'|'ghs'|'dokumente'>((initial?._isNewSupplierPrice||initial?._editPriceTab) ? 'preise' : 'basis')
-  // Neu ausgewählte Lieferanten (noch nicht gespeichert) als sichtbare Tabs
-  const [pendingSuppliers,setPendingSuppliers]=useState<{id:number,name:string}[]>([])
+  const [tab,setTab]=useState<'basis'|'preise'|'chemie'|'ghs'|'dokumente'>('basis')
   const toggleGhs=(g:string)=>setF(p=>({...p,ghs_symbols:p.ghs_symbols.includes(g)?p.ghs_symbols.filter(x=>x!==g):[...p.ghs_symbols,g]}))
 
   const TABS=[{id:'basis',l:'Stammdaten'},{id:'preise',l:'Preise & Zuschläge'},{id:'chemie',l:'Chemie & Zoll'},{id:'ghs',l:'GHS & WGK'},{id:'dokumente',l:'Dokumente'}]
@@ -184,78 +175,6 @@ function MaterialForm({initial,categories,suppliers,onSave,onClose,loading}:any)
       {/* Preise */}
       {tab==='preise'&&(
         <div className="space-y-4" style={{minHeight:440}}>
-          {/* Lieferanten-Tabs */}
-          <div className="p-3 rounded-xl" style={{background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.06)'}}>
-            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Lieferant (Preis gilt für)</p>
-            <div className="flex gap-1.5 flex-wrap items-center">
-              {/* Bestehende Lieferanten */}
-              {(initial?._allPrices||[]).map((p:any)=>(
-                <button key={p.supplier_id} type="button"
-                  onClick={()=>{
-                    s('supplier_id',String(p.supplier_id))
-                    s('base_price',String(p.base_price||''))
-                    s('base_quantity',String(p.base_quantity||'1'))
-                    s('base_unit',p.base_unit||'kg')
-                    s('container_type',p.container_type||'')
-                    s('container_size',p.container_size||'')
-                    s('surcharge_energy',String(p.surcharge_energy||''))
-                    s('surcharge_energy_unit',p.surcharge_energy_unit||'')
-                    s('surcharge_adr',String(p.surcharge_adr||''))
-                    s('valid_from',p.valid_from||new Date().toISOString().slice(0,10))
-                    s('deposit_amount',String(p.deposit_amount||''))
-                    s('deposit_note',p.deposit_note||'')
-                  }}
-                  className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
-                  style={String(f.supplier_id)===String(p.supplier_id)
-                    ?{background:'rgba(99,102,241,0.25)',border:'1px solid rgba(99,102,241,0.5)',color:'#c7d2fe'}
-                    :{background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.1)',color:'#94a3b8'}}>
-                  {p.supplier_name||'Unbekannt'}
-                </button>
-              ))}
-              {/* Neu hinzugefügte Lieferanten (pending) */}
-              {pendingSuppliers.map((ps)=>(
-                <button key={ps.id} type="button"
-                  onClick={()=>{
-                    s('supplier_id',String(ps.id))
-                    s('base_price','');s('container_type','');s('container_size','')
-                    s('surcharge_energy','');s('surcharge_adr','')
-                    s('deposit_amount','');s('deposit_note','')
-                  }}
-                  className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
-                  style={String(f.supplier_id)===String(ps.id)
-                    ?{background:'rgba(99,102,241,0.25)',border:'1px solid rgba(99,102,241,0.5)',color:'#c7d2fe'}
-                    :{background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.1)',color:'#94a3b8'}}>
-                  {ps.name} <span style={{color:'#6366f1',fontSize:9}}>neu</span>
-                </button>
-              ))}
-              <select className="px-2 py-1.5 rounded-xl text-xs" value=""
-                style={{background:'rgba(99,102,241,0.08)',border:'1px dashed rgba(99,102,241,0.35)',color:'#6366f1'}}
-                onChange={e=>{
-                  if(!e.target.value)return
-                  const supId = Number(e.target.value)
-                  const sup = suppliers.find((s:any)=>s.id===supId)
-                  if(!sup)return
-                  // Als pending Tab hinzufügen falls noch nicht vorhanden
-                  if(!pendingSuppliers.some(p=>p.id===supId)){
-                    setPendingSuppliers(prev=>[...prev,{id:supId,name:sup.name}])
-                  }
-                  // Felder für neuen Lieferanten leeren + Lieferant setzen
-                  s('supplier_id',String(supId))
-                  s('base_price','');s('container_type','');s('container_size','')
-                  s('surcharge_energy','');s('surcharge_energy_unit','')
-                  s('surcharge_adr','');s('surcharge_adr_unit','')
-                  s('deposit_amount','');s('deposit_note','')
-                }}>
-                <option value="">+ Weiterer Lieferant …</option>
-                {suppliers
-                  .filter((sup:any)=>
-                    !(initial?._allPrices||[]).some((p:any)=>String(p.supplier_id)===String(sup.id)) &&
-                    !pendingSuppliers.some(p=>String(p.id)===String(sup.id))
-                  )
-                  .map((sup:any)=><option key={sup.id} value={sup.id}>{sup.name}</option>)}
-              </select>
-            </div>
-          </div>
           <div>
             <p className="text-xs font-bold text-brand-400 uppercase tracking-wider mb-2">Gebindeart & Einkaufspreis</p>
             <div className="grid grid-cols-2 gap-3">
@@ -429,86 +348,6 @@ function MaterialDocsTab({ materialId }:{ materialId:number }) {
 
 // ── Hauptseite ────────────────────────────────────────────────
 const CAT_COLORS:Record<number,string> = {1:'#8b5cf6',2:'#06b6d4',3:'#10b981',4:'#f59e0b',5:'#ec4899',6:'#ef4444',7:'#3b82f6',8:'#a78bfa'}
-
-// ── Lieferantenpreise aus DB laden (für Detailansicht) ────────
-function SupplierPricesPanel({ materialId, material, onEdit }: { materialId: number; material: any; onEdit: (v: any) => void }) {
-  const { data: prices = [] } = useQuery<any[]>({
-    queryKey: ['supplier-prices', materialId],
-    queryFn: () => window.api.materials.getPrices(materialId) as Promise<any[]>,
-  })
-  const qc = useQueryClient()
-  const inv = () => {
-    qc.invalidateQueries({ queryKey: ['materials'] })
-    qc.invalidateQueries({ queryKey: ['supplier-prices', materialId] })
-    qc.invalidateQueries({ queryKey: ['supplier-materials'] })
-    qc.invalidateQueries({ queryKey: ['suppliers'] })
-  }
-  const toast = useToast()
-  const deleteP = useMutation({
-    mutationFn: (priceId: number) => window.api.materials.deletePrice(materialId, priceId),
-    onSuccess: () => { inv(); toast.success('Lieferant entfernt') },
-    onError: (e: Error) => toast.error('Fehler', e.message),
-  })
-
-  if (!prices.length) return (
-    <p className="text-xs text-slate-600 italic">Keine Preiseinträge vorhanden</p>
-  )
-
-  const sorted = [...prices].sort((a, b) => b.is_preferred - a.is_preferred || a.price_per_unit - b.price_per_unit)
-  const hasMultiple = sorted.length > 1
-
-  return (
-    <div className={`grid gap-2 ${hasMultiple ? 'grid-cols-2' : 'grid-cols-1'}`}>
-      {sorted.map((p, i) => (
-        <div key={p.id} className="p-3 rounded-xl flex items-center justify-between"
-          style={{
-            background: i===0 ? 'rgb(16 185 129/0.08)' : 'rgb(255 255 255/0.03)',
-            border: i===0 ? '1px solid rgb(16 185 129/0.2)' : '1px solid rgb(255 255 255/0.06)'
-          }}>
-          <div>
-            <div className="flex items-center gap-2">
-              <p className="text-xs font-semibold text-slate-200">{p.supplier_name || '–'}</p>
-              {i===0 && <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold"
-                style={{ background:'rgb(16 185 129/0.2)', color:'#10b981' }}>günstigster</span>}
-            </div>
-            {p.valid_from && <p className="text-[10px] text-slate-600">Gültig ab {p.valid_from}</p>}
-          </div>
-          <div className="text-right">
-            <p className={`text-base font-black font-mono ${i===0 ? 'text-emerald-400' : 'text-slate-300'}`}>
-              {p.price_per_unit ? new Intl.NumberFormat('de-DE',{minimumFractionDigits:4}).format(p.price_per_unit) + ' €' : '–'}
-            </p>
-            <p className="text-[10px] text-slate-600">/kg</p>
-            <div className="flex gap-1 mt-1 justify-end">
-              <button className="btn-ghost p-1" onClick={() => onEdit({
-                ...material,
-                supplier_id: p.supplier_id,
-                base_price: p.base_price || null,
-                base_quantity: p.base_quantity || 1,
-                base_unit: p.base_unit || 'kg',
-                surcharge_energy: p.surcharge_energy || 0,
-                surcharge_energy_unit: p.surcharge_energy_unit || '100 kg',
-                surcharge_adr: p.surcharge_adr || 0,
-                container_type: p.container_type || '',
-                container_size: p.container_size || '',
-                deposit_amount: p.deposit_amount || 0,
-                deposit_note: p.deposit_note || '',
-                valid_from: p.valid_from || '',
-                _allPrices: sorted,
-                _editPriceTab: true,
-              })}>
-                <Pencil size={11}/>
-              </button>
-              <button className="btn-ghost p-1 text-red-400" onClick={() => deleteP.mutate(p.id)}>
-                <Trash2 size={11}/>
-              </button>
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 export default function MaterialsPage() {
   const location    = useLocation()
   const highlightId = (location.state as any)?.highlightId as number | undefined
@@ -749,14 +588,7 @@ export default function MaterialsPage() {
                           <td className="table-td hidden md:table-cell text-slate-500 text-xs">{cheapest.valid_from||'–'}</td>
                           <td className="table-td text-right">
                             <div className="flex gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button className="btn-ghost p-1.5" onClick={e=>{e.stopPropagation();setEditing({...cheapest,_allPrices:group});setOpen(true)}}><Pencil size={12}/></button>
-                              <button
-                                onClick={e=>{e.stopPropagation();setEditing({...cheapest,_allPrices:group,_isNewSupplierPrice:true,supplier_id:null,base_price:null,base_quantity:null,surcharge_energy:null,surcharge_adr:null,container_type:null,container_size:null,deposit_amount:null,deposit_note:null});setOpen(true)}}
-                                className="btn-ghost p-1.5"
-                                style={{color:'#a5b4fc'}}
-                                title="Weiteren Lieferanten hinzufügen">
-                                <Plus size={12}/>
-                              </button>
+                              <button className="btn-ghost p-1.5" onClick={e=>{e.stopPropagation();setEditing(cheapest);setOpen(true)}}><Pencil size={12}/></button>
                               <button className="btn-ghost p-1.5 text-red-400" onClick={e=>{e.stopPropagation();setDeleting(cheapest)}}><Trash2 size={12}/></button>
                             </div>
                           </td>
@@ -766,22 +598,39 @@ export default function MaterialsPage() {
                         {isExp&&(
                           <tr key={`${cheapest.id}-exp`} style={{background:'rgb(139 92 246/0.04)'}}>
                             <td colSpan={8} className="px-6 pb-5 pt-3">
-                              {/* Alle Lieferanten via SupplierPricesPanel — zeigt immer alle supplier_prices */}
-                              <div className="mb-4">
-                                <div className="flex items-center justify-between mb-2">
-                                  <p className="text-[10px] font-bold text-brand-400 uppercase tracking-wider">Alle Lieferanten & Preise</p>
-                                  <button
-                                    onClick={e=>{e.stopPropagation();setEditing({...cheapest,_allPrices:[cheapest],_isNewSupplierPrice:true,supplier_id:null,base_price:null});setOpen(true)}}
-                                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-all"
-                                    style={{background:'rgba(99,102,241,0.15)',border:'1px solid rgba(99,102,241,0.35)',color:'#a5b4fc'}}>
-                                    <Plus size={10}/> Lieferant hinzufügen
-                                  </button>
+                              {/* Alle Lieferanten */}
+                              {hasMultiple&&(
+                                <div className="mb-4">
+                                  <p className="text-[10px] font-bold text-brand-400 uppercase tracking-wider mb-2">Alle Lieferanten & Preise</p>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    {group.map((v,i)=>(
+                                      <div key={v.id} className="p-3 rounded-xl flex items-center justify-between"
+                                        style={{background:i===0?'rgb(16 185 129/0.08)':'rgb(255 255 255/0.03)',border:i===0?'1px solid rgb(16 185 129/0.2)':'1px solid rgb(255 255 255/0.06)'}}>
+                                        <div>
+                                          <div className="flex items-center gap-2">
+                                            <p className="text-xs font-semibold text-slate-200">{v.supplier_name||'–'}</p>
+                                            {i===0&&<span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold" style={{background:'rgb(16 185 129/0.2)',color:'#10b981'}}>günstigster</span>}
+                                          </div>
+                                          {v.base_price&&<p className="text-[10px] text-slate-500 mt-0.5">{v.base_price} € / {v.base_quantity} {v.base_unit}</p>}
+                                          {v.surcharge_energy>0&&<p className="text-[10px] text-amber-500">+Maut {v.surcharge_energy} € / {v.surcharge_energy_unit}</p>}
+                                          {v.surcharge_adr>0&&<p className="text-[10px] text-red-400">+ADR {v.surcharge_adr} € / {v.surcharge_adr_unit}</p>}
+                                          {v.valid_from&&<p className="text-[10px] text-slate-600">Gültig ab {v.valid_from}</p>}
+                                        </div>
+                                        <div className="text-right">
+                                          <p className={`text-base font-black font-mono ${i===0?'text-emerald-400':'text-slate-300'}`}>
+                                            {v.price_per_kg_calc?fmtEur(v.price_per_kg_calc):'-'}
+                                          </p>
+                                          <p className="text-[10px] text-slate-600">/kg</p>
+                                          <div className="flex gap-1 mt-1 justify-end">
+                                            <button className="btn-ghost p-1" onClick={e=>{e.stopPropagation();setEditing(v);setOpen(true)}}><Pencil size={11}/></button>
+                                            <button className="btn-ghost p-1 text-red-400" onClick={e=>{e.stopPropagation();setDeleting(v)}}><Trash2 size={11}/></button>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
                                 </div>
-                                <SupplierPricesPanel
-                                  materialId={cheapest.id}
-                                  onEdit={v=>{setEditing({...v,_allPrices:[v]});setOpen(true)}}
-                                />
-                              </div>
+                              )}
                               {/* Stamm- & Chemiedaten */}
                               <div className="grid grid-cols-3 gap-4">
                                 <div>
@@ -838,7 +687,7 @@ export default function MaterialsPage() {
                 isActive={!!m.is_active}
                 title={m.name}
                 subtitle={m.code}
-                onEdit={()=>{setEditing({...m,_allPrices:[m]});setOpen(true)}}
+                onEdit={()=>{setEditing(m);setOpen(true)}}
                 onDelete={()=>setDeleting(m)}
                 badge={m.wgk&&m.wgk!=='-'?m.wgk:undefined}
                 meta={[

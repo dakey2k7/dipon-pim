@@ -186,9 +186,159 @@ export function getDb(): Database.Database {
     _db.exec(`ALTER TABLE product_materials ADD COLUMN sort_order INTEGER DEFAULT 0`)
   } catch {}
   try {
-    // Bestehende Einträge mit sort_order initialisieren (nach id)
-    _db.exec(`UPDATE product_materials SET sort_order = id WHERE sort_order = 0 OR sort_order IS NULL`)
+    // sort_order normalisieren: jedes Produkt bekommt saubere Reihenfolge nach id
+    const prodIds = _db.prepare(`SELECT DISTINCT product_id FROM product_materials`).all() as {product_id:number}[]
+    const updOrd = _db.prepare(`UPDATE product_materials SET sort_order=? WHERE id=?`)
+    for (const {product_id} of prodIds) {
+      const rows = _db.prepare(
+        `SELECT id FROM product_materials WHERE product_id=? AND (sort_order=0 OR sort_order IS NULL) ORDER BY id`
+      ).all(product_id) as {id:number}[]
+      if (rows.length > 0) {
+        // Nur Zeilen ohne order neu setzen
+        const maxOrd = (_db.prepare(`SELECT MAX(sort_order) as m FROM product_materials WHERE product_id=? AND sort_order > 0`).get(product_id) as any)?.m ?? 0
+        rows.forEach((r, i) => updOrd.run(maxOrd + (i+1)*10, r.id))
+      }
+    }
   } catch {}
+
+  // === TEA Cleanup: Triethanolamin normalisieren ===
+  try {
+    // 1. Alle inaktiven Materialien mit TEA-Code bereinigen
+    _db.exec(`UPDATE materials SET is_active=0 WHERE code LIKE 'TEA99-REI%'`)
+
+    // 2. TEA99-BRE finden (aktives Material)
+    const breMat = _db.prepare(`SELECT id FROM materials WHERE code='TEA99-BRE' AND is_active=1`).get() as any
+    if (breMat) {
+      // 3. Alle product_materials umleiten
+      const inactiveTea = _db.prepare(`SELECT id FROM materials WHERE code LIKE 'TEA99-REI%'`).all() as any[]
+      for (const t of inactiveTea) {
+        _db.prepare(`UPDATE product_materials SET material_id=? WHERE material_id=?`).run(breMat.id, t.id)
+      }
+
+      // 4. Nur Brenntag + Reininghaus erlaubt — alle anderen entfernen
+      const allowed = _db.prepare(`
+        SELECT sp.id FROM supplier_prices sp
+        JOIN suppliers s ON s.id=sp.supplier_id
+        WHERE sp.material_id=?
+          AND (s.name NOT LIKE '%Brenntag%' AND s.name NOT LIKE '%Reininghaus%')
+      `).all(breMat.id) as any[]
+      for (const a of allowed) {
+        _db.prepare(`DELETE FROM supplier_prices WHERE id=?`).run(a.id)
+      }
+
+      // 5. Duplikate je Lieferant entfernen (behalte neuesten)
+      _db.exec(`
+        DELETE FROM supplier_prices
+        WHERE material_id=${breMat.id}
+          AND id NOT IN (
+            SELECT MAX(id) FROM supplier_prices
+            WHERE material_id=${breMat.id}
+            GROUP BY supplier_id
+          )
+      `)
+
+      // 6. Reininghaus mit 1.20€/kg hinzufügen falls komplett fehlend
+      const hasRein = _db.prepare(`
+        SELECT COUNT(*) as n FROM supplier_prices sp
+        JOIN suppliers s ON s.id=sp.supplier_id
+        WHERE sp.material_id=? AND s.name LIKE '%Reininghaus%'
+      `).get(breMat.id) as any
+      if (hasRein?.n === 0) {
+        const rein = _db.prepare(`SELECT id FROM suppliers WHERE name LIKE '%Reininghaus%' LIMIT 1`).get() as any
+        if (rein) {
+          _db.prepare(`INSERT INTO supplier_prices (material_id,supplier_id,price_per_unit,unit,currency,valid_from,is_preferred) VALUES (?,?,1.20,'kg','EUR',date('now'),0)`).run(breMat.id, rein.id)
+        }
+      }
+
+      // 7. Brenntag als preferred setzen
+      const bren = _db.prepare(`
+        SELECT sp.id FROM supplier_prices sp
+        JOIN suppliers s ON s.id=sp.supplier_id
+        WHERE sp.material_id=? AND s.name LIKE '%Brenntag%'
+        ORDER BY sp.id LIMIT 1
+      `).get(breMat.id) as any
+      if (bren) {
+        _db.prepare(`UPDATE supplier_prices SET is_preferred=0 WHERE material_id=?`).run(breMat.id)
+        _db.prepare(`UPDATE supplier_prices SET is_preferred=1 WHERE id=?`).run(bren.id)
+      }
+    }
+  } catch(e) { console.error('TEA cleanup:', e) }
+  // Migration: supplier_id in materials-Tabelle aus preferred supplier_prices befüllen
+  try {
+    _db.exec(`
+      UPDATE materials
+      SET supplier_id = (
+        SELECT sp.supplier_id FROM supplier_prices sp
+        WHERE sp.material_id = materials.id AND sp.is_preferred = 1
+        LIMIT 1
+      )
+      WHERE supplier_id IS NULL
+        AND EXISTS (
+          SELECT 1 FROM supplier_prices sp2
+          WHERE sp2.material_id = materials.id AND sp2.is_preferred = 1
+        )
+    `)
+  } catch(e) { console.error('supplier_id backfill:', e) }
+  // Migration: Reininghaus Chemie Preis für TEA99-BRE wiederherstellen
+  try {
+    const breMat = _db.prepare(`SELECT id FROM materials WHERE code='TEA99-BRE' AND is_active=1`).get() as any
+    const rein   = _db.prepare(`SELECT id FROM suppliers WHERE name LIKE '%Reininghaus%' LIMIT 1`).get() as any
+    if (breMat && rein) {
+      const existing = _db.prepare(
+        `SELECT id FROM supplier_prices WHERE material_id=? AND supplier_id=?`
+      ).get(breMat.id, rein.id) as any
+
+      if (!existing) {
+        // Reininghaus-Eintrag komplett fehlt → wiederherstellen
+        _db.prepare(`
+          INSERT OR IGNORE INTO supplier_prices (
+            material_id, supplier_id, price_per_unit, currency, unit, is_preferred, valid_from
+          ) VALUES (?,?,1.9520,'EUR','kg',0,date('now'))
+        `).run(breMat.id, rein.id)
+        console.log('✅ Reininghaus Chemie Preis für TEA99-BRE wiederhergestellt')
+      } else {
+        // Eintrag vorhanden aber ggf. falsche Preise → aktualisieren
+        _db.prepare(`
+          UPDATE supplier_prices SET
+            price_per_unit=1.9520, currency='EUR', unit='kg',
+            is_preferred=0, updated_at=datetime('now')
+          WHERE id=?
+        `).run(existing.id)
+        console.log('✅ Reininghaus Chemie Preis für TEA99-BRE korrigiert')
+      }
+
+      // Brenntag als preferred sicherstellen
+      const bren = _db.prepare(`
+        SELECT sp.id FROM supplier_prices sp
+        JOIN suppliers s ON s.id=sp.supplier_id
+        WHERE sp.material_id=? AND s.name LIKE '%Brenntag%'
+          AND s.name NOT LIKE '%GmbH%'
+        LIMIT 1
+      `).get(breMat.id) as any
+      if (bren) {
+        _db.prepare(`UPDATE supplier_prices SET is_preferred=0 WHERE material_id=?`).run(breMat.id)
+        _db.prepare(`UPDATE supplier_prices SET is_preferred=1 WHERE id=?`).run(bren.id)
+      }
+    }
+  } catch(e) { console.error('Reininghaus restore:', e) }
+  // Fix: Brenntag Preis für TEA99-BRE korrigieren (4.80 → 1.7245 €/kg)
+  try {
+    const breMat = _db.prepare(`SELECT id FROM materials WHERE code='TEA99-BRE' AND is_active=1`).get() as any
+    if (breMat) {
+      const bren = _db.prepare(`
+        SELECT sp.id, sp.price_per_unit FROM supplier_prices sp
+        JOIN suppliers s ON s.id=sp.supplier_id
+        WHERE sp.material_id=? AND s.name LIKE '%Brenntag%'
+          AND s.name NOT LIKE '%GmbH%' LIMIT 1
+      `).get(breMat.id) as any
+      // Brenntag Preis war falsch auf 4.80 gesetzt — korrekt: 163.5€/100kg + 8.95€/100kg Maut = 1.7245€/kg
+      if (bren && (bren.price_per_unit > 2 || bren.price_per_unit < 1)) {
+        _db.prepare(`UPDATE supplier_prices SET price_per_unit=1.7245, unit='kg', valid_from='2026-04-14' WHERE id=?`)
+          .run(bren.id)
+        console.log('✅ Brenntag TEA Preis korrigiert: 1.7245 €/kg')
+      }
+    }
+  } catch(e) { console.error('Brenntag price fix:', e) }
   if (isNew) {
     console.log('🌱 Neue DB …')
     _db.exec(SEED_SQL)

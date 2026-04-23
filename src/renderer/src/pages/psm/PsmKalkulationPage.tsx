@@ -247,9 +247,9 @@ export default function PsmKalkulationPage() {
   const [dirty,          setDirty]          = useState(false)
   const [tagInput,       setTagInput]       = useState('')
   const [saving,         setSaving]         = useState(false)
-  const [folderForm,     setFolderForm]     = useState({ name:'', color:FOLDER_COLORS[0] })
+  const [folderForm,     setFolderForm]     = useState({ name:'', color:FOLDER_COLORS[0], parent_id: null as number|null })
   const [calcForm,       setCalcForm]       = useState({
-    name:'', description:'', unit_type:'liter', unit_label:'', vat_pct:19, tags:[] as string[],
+    name:'', description:'', unit_type:'liter', unit_label:'', vat_pct:19, tags:[] as string[], folder_id: null as number|null,
   })
 
   const { data: folders=[] } = useQuery<any[]>({
@@ -346,7 +346,7 @@ export default function PsmKalkulationPage() {
                 </button>
                 {/* Edit/Delete on hover */}
                 <div className="absolute -top-1 -right-1 hidden group-hover:flex gap-0.5 z-10">
-                  <button onClick={()=>{setEditFolder(f);setFolderForm({name:f.name,color:f.color});setShowFolderModal(true)}}
+                  <button onClick={()=>{setEditFolder(f);setFolderForm({name:f.name,color:f.color,parent_id:f.parent_id??null});setShowFolderModal(true)}}
                     className="w-4 h-4 rounded flex items-center justify-center" style={{background:'#1e293b',border:'1px solid rgba(255,255,255,0.15)'}}>
                     <Pencil size={8} className="text-slate-400"/>
                   </button>
@@ -358,7 +358,7 @@ export default function PsmKalkulationPage() {
               </div>
             ))}
 
-            <button onClick={()=>{setEditFolder(null);setFolderForm({name:'',color:FOLDER_COLORS[0]});setShowFolderModal(true)}}
+            <button onClick={()=>{setEditFolder(null);setFolderForm({name:'',color:FOLDER_COLORS[0],parent_id:null});setShowFolderModal(true)}}
               className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-600 hover:text-white transition-colors"
               style={{border:'1px dashed rgba(255,255,255,0.12)'}} title="Ordner anlegen">
               <Plus size={12}/>
@@ -389,7 +389,7 @@ export default function PsmKalkulationPage() {
                 </button>
                 {/* Edit/Delete on hover */}
                 <div className="absolute -top-1 -right-1 hidden group-hover:flex gap-0.5 z-10">
-                  <button onClick={()=>{setEditCalc(c);setCalcForm({name:c.name,description:c.description||'',unit_type:c.unit_type,unit_label:c.unit_label||'',vat_pct:c.vat_pct,tags:Array.isArray(c.tags)?c.tags:[]});setShowCalcModal(true)}}
+                  <button onClick={()=>{setEditCalc(c);setCalcForm({name:c.name,description:c.description||'',unit_type:c.unit_type,unit_label:c.unit_label||'',vat_pct:c.vat_pct,tags:Array.isArray(c.tags)?c.tags:[],folder_id:c.folder_id??null});setShowCalcModal(true)}}
                     className="w-4 h-4 rounded flex items-center justify-center" style={{background:'#1e293b',border:'1px solid rgba(255,255,255,0.15)'}}>
                     <Pencil size={8} className="text-slate-400"/>
                   </button>
@@ -402,7 +402,7 @@ export default function PsmKalkulationPage() {
             ))}
 
             <button
-              onClick={()=>{setEditCalc(null);setCalcForm({name:'',description:'',unit_type:'liter',unit_label:'',vat_pct:19,tags:[]});setShowCalcModal(true)}}
+              onClick={()=>{setEditCalc(null);setCalcForm({name:'',description:'',unit_type:'liter',unit_label:'',vat_pct:19,tags:[],folder_id:selectedFolder==='all'?null:selectedFolder as number|null});setShowCalcModal(true)}}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:text-white transition-colors"
               style={{border:'1px dashed rgba(255,255,255,0.12)'}}>
               <Plus size={11}/> Neu
@@ -463,6 +463,18 @@ export default function PsmKalkulationPage() {
         <div className="space-y-3">
           <Input label="Name *" value={folderForm.name} autoFocus
             onChange={e=>setFolderForm(p=>({...p,name:e.target.value}))}/>
+          {/* Übergeordneter Ordner */}
+          <div>
+            <label className="text-xs text-slate-400 mb-1 block font-semibold">Übergeordneter Ordner (optional)</label>
+            <select className="form-input text-sm w-full"
+              value={folderForm.parent_id ?? ''}
+              onChange={e => setFolderForm(p => ({ ...p, parent_id: e.target.value ? Number(e.target.value) : null }))}>
+              <option value="">– Kein (Root-Ordner) –</option>
+              {(folders as any[]).filter((f:any) => !f.parent_id && f.id !== editFolder?.id).map((f:any) => (
+                <option key={f.id} value={f.id}>{f.name}</option>
+              ))}
+            </select>
+          </div>
           <div>
             <label className="text-xs text-slate-400 mb-2 block font-semibold">Farbe</label>
             <div className="flex gap-2">
@@ -476,7 +488,7 @@ export default function PsmKalkulationPage() {
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" onClick={()=>setShowFolderModal(false)}>Abbrechen</Button>
             <Button disabled={!folderForm.name} loading={saveFolder.isPending}
-              onClick={()=>saveFolder.mutate({...editFolder,...folderForm})}>
+              onClick={()=>saveFolder.mutate({...editFolder,...folderForm,parent_id:folderForm.parent_id})}>
               {editFolder?'Speichern':'Anlegen'}
             </Button>
           </div>
@@ -528,10 +540,36 @@ export default function PsmKalkulationPage() {
                 className="btn-ghost p-2 text-brand-400"><Plus size={13}/></button>
             </div>
           </div>
+          {/* Ordner-Zuweisung */}
+          <div>
+            <label className="text-xs text-slate-400 mb-1 block font-semibold flex items-center gap-1">
+              <Folder size={11}/> Ordner
+            </label>
+            <select className="form-input text-sm w-full"
+              value={calcForm.folder_id ?? ''}
+              onChange={e => setCalcForm(p => ({ ...p, folder_id: e.target.value ? Number(e.target.value) : null }))}>
+              <option value="">– Kein Ordner –</option>
+              {/* Root-Ordner */}
+              {(folders as any[]).filter((f:any) => !f.parent_id).map((f:any) => {
+                const children = (folders as any[]).filter((sub:any) => sub.parent_id === f.id)
+                return children.length > 0 ? (
+                  <optgroup key={f.id} label={`📁 ${f.name}`}>
+                    <option value={f.id}>{f.name} (Ordner)</option>
+                    {children.map((sub:any) => (
+                      <option key={sub.id} value={sub.id}>↳ {sub.name}</option>
+                    ))}
+                  </optgroup>
+                ) : (
+                  <option key={f.id} value={f.id}>{f.name}</option>
+                )
+              })}
+            </select>
+          </div>
+
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" onClick={()=>setShowCalcModal(false)}>Abbrechen</Button>
             <Button disabled={!calcForm.name} loading={saveCalc.isPending}
-              onClick={()=>saveCalc.mutate({...(editCalc||{}),...calcForm,folder_id:editCalc?.folder_id||null})}>
+              onClick={()=>saveCalc.mutate({...(editCalc||{}),...calcForm,folder_id:calcForm.folder_id})}>
               {editCalc?'Speichern':'Anlegen'}
             </Button>
           </div>

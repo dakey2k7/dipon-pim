@@ -23,6 +23,7 @@ import VatRatesPage            from '@/pages/vat-rates/VatRatesPage'
 import ShippingPage             from '@/pages/shipping/ShippingPage'
 import PaymentProfilesPage      from '@/pages/payment/PaymentProfilesPage'
 import PsmKalkulationPage       from '@/pages/psm/PsmKalkulationPage'
+import RmiiPage                 from '@/pages/rmii/RmiiPage'
 import SystempreisePage         from '@/pages/systemprices/SystempreisePage'
 import DocumentsPage            from '@/pages/documents/DocumentsPage'
 import TrashPage                from '@/pages/trash/TrashPage'
@@ -68,6 +69,7 @@ export default function App() {
             <Route path="shipping-manager"  element={<ShippingPage />} />
             <Route path="payment-profiles"  element={<PaymentProfilesPage />} />
             <Route path="psm-kalkulation"   element={<PsmKalkulationPage />} />
+            <Route path="rmii"              element={<RmiiPage />} />
             <Route path="margins"           element={<MarginsPage />} />
             <Route path="preistabelle"      element={<PreistabellePage />} />
             <Route path="wettbewerb"        element={<WettbewerbPage />} />

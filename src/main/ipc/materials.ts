@@ -10,13 +10,14 @@ export function registerMaterialHandlers(): void {
       SELECT m.*, c.name AS category_name, c.color AS category_color,
         sp.price_per_unit AS preferred_price, sp.currency AS preferred_currency,
         sp.unit AS preferred_unit, s.name AS preferred_supplier,
+        s.id AS preferred_supplier_id,
         s.name AS supplier_name,
         (SELECT COUNT(*) FROM supplier_prices sp2 WHERE sp2.material_id = m.id) AS supplier_count
       FROM materials m
       LEFT JOIN categories c ON c.id = m.category_id
       LEFT JOIN supplier_prices sp ON sp.material_id = m.id AND sp.is_preferred = 1
       LEFT JOIN suppliers s ON s.id = sp.supplier_id
-      WHERE 1=1
+      WHERE m.is_active = 1
     `
     const p: unknown[] = []
     if (params.search) {
@@ -133,23 +134,51 @@ export function registerMaterialHandlers(): void {
       d.is_hazardous?1:0, d.is_active??1,
       d.supplier_id?Number(d.supplier_id):null, id
     )
-    // Wenn supplier_id gesetzt: in supplier_prices diesen Lieferanten als preferred markieren
-    if (d.supplier_id) {
+    // Wenn Preis-Felder mitgeliefert: supplier_prices UPSERT
+    // NUR Spalten die tatsächlich in supplier_prices existieren!
+    // Andere Lieferanten werden NICHT angefasst.
+    if (d.supplier_id && d.base_price) {
       const supplierId = Number(d.supplier_id)
-      // Prüfen ob Preiseintrag für diesen Lieferanten existiert
-      const existing = db.prepare(
+      const basePrice  = Number(d.base_price)
+      const baseQty    = Number(d.base_quantity) || 1
+      const baseUnit   = String(d.base_unit || 'kg')
+      // Preis/Einheit berechnen
+      const pricePerUnit = baseQty > 0
+        ? Math.round(basePrice / baseQty * 10000) / 10000
+        : basePrice
+      // Energiezuschlag pro Einheit addieren
+      const surcharge = Number(d.surcharge_energy) || 0
+      const eUnit     = String(d.surcharge_energy_unit || '100 kg')
+      const eFactor   = Number(eUnit.match(/\d+/)?.[0]) || 100
+      const surchargePerUnit = surcharge > 0 ? Math.round(surcharge / eFactor * 10000) / 10000 : 0
+      const totalPerUnit = Math.round((pricePerUnit + surchargePerUnit) * 10000) / 10000
+
+      const exists = db.prepare(
         `SELECT id FROM supplier_prices WHERE material_id=? AND supplier_id=?`
-      ).get(id, supplierId)
-      if (existing) {
-        // Alle anderen auf nicht-preferred setzen, diesen auf preferred
-        db.prepare(`UPDATE supplier_prices SET is_preferred=0 WHERE material_id=?`).run(id)
-        db.prepare(`UPDATE supplier_prices SET is_preferred=1 WHERE material_id=? AND supplier_id=?`).run(id, supplierId)
-      }
-      // Falls kein Preiseintrag: zumindest alle anderen als nicht-preferred
-      else {
-        db.prepare(`UPDATE supplier_prices SET is_preferred=0 WHERE material_id=?`).run(id)
+      ).get(id, supplierId) as any
+
+      if (exists) {
+        // Update — NUR price_per_unit, unit, valid_from (vorhandene Spalten!)
+        db.prepare(`UPDATE supplier_prices SET
+          price_per_unit=?, unit=?, currency=?, valid_from=?, updated_at=datetime('now')
+          WHERE material_id=? AND supplier_id=?`)
+          .run(totalPerUnit, baseUnit, d.currency||'EUR',
+            d.valid_from || new Date().toISOString().slice(0,10), id, supplierId)
+      } else {
+        // INSERT — nur valide Spalten, is_preferred=0 (bestehende bleiben preferred!)
+        db.prepare(`INSERT INTO supplier_prices
+          (material_id, supplier_id, price_per_unit, unit, currency, is_preferred, valid_from)
+          VALUES (?,?,?,?,?,0,?)`)
+          .run(id, supplierId, totalPerUnit, baseUnit, d.currency||'EUR',
+            d.valid_from || new Date().toISOString().slice(0,10))
+        // Preishistorie
+        db.prepare(`INSERT INTO price_history
+          (material_id, supplier_id, price_per_unit, currency, unit, source)
+          VALUES (?,?,?,'EUR',?,'new_supplier')`)
+          .run(id, supplierId, totalPerUnit, baseUnit)
       }
     }
+
     return db.prepare('SELECT * FROM materials WHERE id = ?').get(id)
   })
 

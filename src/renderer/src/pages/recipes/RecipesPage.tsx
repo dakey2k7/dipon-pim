@@ -39,7 +39,7 @@ const UNIT_MODES = [
 ]
 
 // ── Live-Kalkulation (rechts, wie Bild 1) ─────────────────────
-function LiveCalcPanel({ mats, product }: { mats: PM[]; product: Product }) {
+function LiveCalcPanel({ mats, product, overridePrices = {} }: { mats: PM[]; product: Product; overridePrices?: Record<number,number> }) {
   const batchKg = toKg(product.batch_size, product.batch_unit)
   const [chargeKg,  setChargeKg]  = useState(() => batchKg > 0 ? batchKg : 1)
   const [unitModeK, setUnitModeK] = useState('kg')
@@ -111,7 +111,7 @@ function LiveCalcPanel({ mats, product }: { mats: PM[]; product: Product }) {
                     ? fmt(mKg, 2) + ' kg'
                     : fmt(mKg * 1000, 2) + ' g'}
                   {' · '}
-                  <span style={{ color:'#e2e8f0' }}>{fmt(frac * 100, 2)}%</span>
+                  <span style={{ color:'#ffffff', fontWeight:600 }}>{fmt(frac * 100, 2)}%</span>
                 </p>
               </div>
               {/* Preis + Anteil */}
@@ -126,7 +126,7 @@ function LiveCalcPanel({ mats, product }: { mats: PM[]; product: Product }) {
                     </p>
                   </>
                 ) : (
-                  <p className="text-[10px]" style={{ color:'#f87171' }}>kein Preis</p>
+                  <p className="text-xs font-semibold" style={{ color:'#f87171' }}>kein Preis</p>
                 )}
               </div>
             </div>
@@ -229,6 +229,8 @@ function RecipeMatRow({ mat, index, total, productId, allMats, onSaved, onDelete
   const prices: any[] = (() => { try { return mat.all_prices_json ? JSON.parse(mat.all_prices_json) : [] } catch { return [] } })()
   const minPrice = prices.length > 1 ? Math.min(...prices.map((p:any) => p.price_per_unit ?? 9999)) : null
   const maxPrice = prices.length > 1 ? Math.max(...prices.map((p:any) => p.price_per_unit ?? 0)) : null
+  // Preis des bevorzugten Lieferanten für Anzeige
+  const prefPrice = prices.find((p:any) => p.is_preferred)?.price_per_unit ?? prices[0]?.price_per_unit ?? mat.pref_price
 
   const saveM = useMutation({
     mutationFn: (d: unknown) => window.api.products.saveMaterial(productId, d),
@@ -236,10 +238,18 @@ function RecipeMatRow({ mat, index, total, productId, allMats, onSaved, onDelete
     onError:   (e: Error) => toast.error('Fehler', e.message),
   })
 
-  // Materialien nach Kategorie gruppiert
+  // Materialien nach Kategorie gruppiert (dedupliziert nach Name, günstigster bleibt)
   const byCategory = useMemo(() => {
     const groups: Record<string, Material[]> = {}
+    const seen = new Map<string, Material>()
     for (const m of allMats) {
+      const key = m.name.toLowerCase().replace(/[^a-z0-9]/g,'')
+      const existing = seen.get(key)
+      if (!existing || (m.preferred_price != null && (existing.preferred_price == null || m.preferred_price < existing.preferred_price))) {
+        seen.set(key, m)
+      }
+    }
+    for (const m of seen.values()) {
       const cat = (m as any).product_type || 'Sonstige'
       if (!groups[cat]) groups[cat] = []
       groups[cat].push(m)
@@ -332,28 +342,58 @@ function RecipeMatRow({ mat, index, total, productId, allMats, onSaved, onDelete
         <p className="text-sm font-semibold text-white truncate">{mat.material_name}</p>
         {/* Lieferant + Detail-Link */}
         <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+          {/* Mehrere Lieferanten → Dropdown */}
           {prices.length > 1 ? (
             <select
-              className="text-[10px] font-mono rounded px-1 py-0"
-              style={{ background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', color:'#e2e8f0', maxWidth:180 }}
-              defaultValue={prices.find((p:any) => p.is_preferred)?.supplier_id || ''}>
+              className="rounded px-1.5 py-0.5"
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.15)',
+                color: '#ffffff',
+                fontSize: '11px',
+                maxWidth: 210,
+              }}
+              defaultValue={prices.find((p:any) => p.is_preferred)?.supplier_id || prices[0]?.supplier_id || ''}
+              onChange={e => {
+                const selectedId = Number(e.target.value)
+                const selectedPrice = prices.find((p:any) => p.supplier_id === selectedId)?.price_per_unit
+                if (selectedPrice != null) {
+                  // Lift to parent RecipeCard via prop (via callback not available here)
+                  // Store in DOM-accessible way - dispatch custom event
+                  window.dispatchEvent(new CustomEvent('supplier-selected', {
+                    detail: { material_id: mat.material_id, price: selectedPrice }
+                  }))
+                }
+              }}>
               {prices.map((p:any) => {
-                const price = p.price_per_unit ?? p.pref_price ?? 0
-                const isMin = minPrice !== null && Math.abs(price - minPrice) < 0.0001
-                const isMax = maxPrice !== null && Math.abs(price - maxPrice) < 0.0001 && !isMin
+                const price = p.price_per_unit ?? null
+                const isMin = minPrice !== null && price !== null && Math.abs(price - minPrice) < 0.0001
+                const isMax = maxPrice !== null && price !== null && Math.abs(price - maxPrice) < 0.0001 && !isMin
                 return (
                   <option key={p.supplier_id} value={p.supplier_id}
-                    style={{ color: isMin ? '#4ade80' : isMax ? '#f87171' : '#e2e8f0' }}>
+                    style={{ color: isMin ? '#4ade80' : isMax ? '#f87171' : '#ffffff' }}>
                     {p.is_preferred ? '★ ' : ''}{p.supplier_name}
-                    {' – '}{fmt(price, 2)} €/{mat.unit}
+                    {price != null ? ` – ${fmt(price, 2)} €/${mat.unit}` : ''}
                   </option>
                 )
               })}
             </select>
-          ) : (
-            <span className="text-[10px]" style={{ color:'#e2e8f0' }}>
-              {mat.pref_supplier_name || mat.material_code}
+          ) : prices.length === 1 ? (
+            /* Genau ein Lieferant → statischer Name in Weiß */
+            <span className="px-1.5 py-0.5 rounded"
+              style={{ color:'#ffffff', fontSize:'11px', background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)' }}>
+              ★ {prices[0].supplier_name}
+              {prices[0].price_per_unit != null ? ` · ${fmt(prices[0].price_per_unit, 2)} €/${mat.unit}` : ''}
             </span>
+          ) : mat.pref_supplier_name ? (
+            /* supplier_id gesetzt aber kein supplier_prices Eintrag */
+            <span className="px-1.5 py-0.5 rounded"
+              style={{ color:'#ffffff', fontSize:'11px', background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)' }}>
+              ★ {mat.pref_supplier_name}
+            </span>
+          ) : (
+            /* Wirklich kein Lieferant */
+            <span className="" style={{ color:'#ef4444', fontSize:'11px' }}>Kein Lieferant</span>
           )}
           <button
             onClick={e => { e.stopPropagation(); navigate('/materials', { state: { highlightId: mat.material_id } }) }}
@@ -382,7 +422,7 @@ function RecipeMatRow({ mat, index, total, productId, allMats, onSaved, onDelete
             </p>
           </>
         ) : (
-          <p className="text-[10px]" style={{ color:'#f87171' }}>kein Preis</p>
+          <p className="text-xs font-semibold" style={{ color:'#f87171' }}>kein Preis</p>
         )}
       </div>
 
@@ -507,8 +547,10 @@ function AddMatForm({ productId, allMats, onAdded, onCancel }: {
 function RecipeCard({ product, defaultOpen = false }: { product: Product; defaultOpen?: boolean }) {
   const qc    = useQueryClient()
   const toast = useToast()
-  const [open,    setOpen]    = useState(defaultOpen)
-  const [showAdd, setShowAdd] = useState(false)
+  const [open,       setOpen]    = useState(defaultOpen)
+  const [showAdd,    setShowAdd] = useState(false)
+  // Ausgewählter Lieferant + Preis je Material (für Live-Kalkulation)
+  const [selPrices, setSelPrices] = useState<Record<number, number>>({})
 
   const { data: detail } = useQuery<{ materials: PM[]; variants: any[] }>({
     queryKey: ['product-detail', product.id],
@@ -523,6 +565,17 @@ function RecipeCard({ product, defaultOpen = false }: { product: Product; defaul
   const invD = useCallback(() =>
     qc.invalidateQueries({ queryKey: ['product-detail', product.id] })
   , [qc, product.id])
+
+  // Lieferanten-Auswahl → Live-Kalkulation aktualisieren
+  // Verwende product.id als Schlüssel, nicht mats (verhindert TDZ-Fehler)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { material_id, price } = (e as CustomEvent).detail
+      setSelPrices(prev => ({ ...prev, [material_id]: price }))
+    }
+    window.addEventListener('supplier-selected', handler)
+    return () => window.removeEventListener('supplier-selected', handler)
+  }, [product.id])
 
   const delMat = useMutation({
     mutationFn: (id: number) => window.api.products.deleteMaterial(product.id, id),
@@ -546,6 +599,21 @@ function RecipeCard({ product, defaultOpen = false }: { product: Product; defaul
               <p className="text-sm font-bold text-white">{product.name}</p>
               <span className="badge-blue text-xs font-mono">{product.code}</span>
               {product.group_name && <span className="text-xs text-slate-500">{product.group_name}</span>}
+              <button
+                onClick={e => {
+                  e.stopPropagation()
+                  setEditingProduct(product)
+                  setEditProdForm({
+                    name: product.name, code: product.code,
+                    product_group_id: '', batch_size: product.batch_size,
+                    batch_unit: product.batch_unit,
+                  })
+                  setShowEditProduct(true)
+                }}
+                className="p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-all hover:bg-white/8"
+                style={{ color:'#6366f1' }} title="Produkt bearbeiten">
+                <Pencil size={11}/>
+              </button>
             </div>
             <div className="flex items-center gap-3 mt-0.5 flex-wrap">
               <span className="text-xs text-slate-500">{product.batch_size} {product.batch_unit} Batch</span>
@@ -625,9 +693,9 @@ function RecipeCard({ product, defaultOpen = false }: { product: Product; defaul
               )}
             </div>
 
-            {/* ── Rechte Seite: Live-Kalkulation (wie Bild 1) ── */}
+            {/* ── Rechte Seite: Live-Kalkulation ── */}
             {mats.length > 0 && (
-              <LiveCalcPanel mats={mats} product={product}/>
+              <LiveCalcPanel mats={mats} product={product} overridePrices={selPrices}/>
             )}
           </div>
         </div>
@@ -645,6 +713,11 @@ export default function RecipesPage() {
   const [filterGroup,     setFilterGroup]     = useState('')
   const [sortBy,          setSortBy]          = useState('name_asc')
   const [showNew,         setShowNew]         = useState(false)
+  const [editingProduct,  setEditingProduct]  = useState<Product | undefined>()
+  const [showEditProduct, setShowEditProduct] = useState(false)
+  const [editProdForm,    setEditProdForm]    = useState({
+    name:'', code:'', product_group_id:'', batch_size:1000, batch_unit:'g',
+  })
   const [newForm,         setNewForm]         = useState({
     name:'', code:'', product_group_id:'',
     batch_size:1000, batch_unit:'g',
@@ -677,6 +750,11 @@ export default function RecipesPage() {
   const withoutRecipe = sorted.filter(p => (p.material_count ?? 0) === 0)
 
   const inv = () => qc.invalidateQueries({ queryKey: ['products'] })
+  const updateProd = useMutation({
+    mutationFn: ({ id, d }: { id:number; d:unknown }) => window.api.products.update(id, d),
+    onSuccess: () => { inv(); setShowEditProduct(false); toast.success('Produkt aktualisiert') },
+    onError:   (e: Error) => toast.error('Fehler', e.message),
+  })
   const createM = useMutation({
     mutationFn: (d: unknown) => window.api.products.create(d),
     onSuccess:  () => { inv(); setShowNew(false); toast.success('Angelegt') },

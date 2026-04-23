@@ -34,6 +34,7 @@ const NAV_GROUPS = [
     { label: 'Varianten-Vorlagen', path: '/variant-templates', icon: <Tag size={15}/>,     color: '#f59e0b' },
   ]},
   { label: 'Kalkulation', items: [
+    { label: 'RMII Simulator',      path: '/rmii',            icon: <TrendingUp size={15}/>, color: '#f59e0b' },
     { label: 'Preistabelle',     path: '/preistabelle',  icon: <Table2 size={15}/>,     color: '#06b6d4' },
     { label: 'Wettbewerb',       path: '/wettbewerb',    icon: <Swords size={15}/>,     color: '#ef4444' },
     { label: 'Systempreise',     path: '/system-prices', icon: <TrendingUp size={15}/>, color: '#10b981' },

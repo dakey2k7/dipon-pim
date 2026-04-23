@@ -82,19 +82,35 @@ export function registerProductHandlers(): void {
                ELSE NULL END
         ) AS pref_price,
         COALESCE(sp_pref.currency, 'EUR') AS pref_currency,
-        s_pref.name AS pref_supplier_name,
-        s_pref.id   AS pref_supplier_id,
+        COALESCE(s_pref.name,
+          (SELECT name FROM suppliers WHERE id=m.supplier_id)
+        ) AS pref_supplier_name,
+        COALESCE(s_pref.id, m.supplier_id) AS pref_supplier_id,
         (SELECT json_group_array(json_object(
-          'supplier_id',   sp2.supplier_id,
-          'supplier_name', s2.name,
-          'price_per_unit',sp2.price_per_unit,
-          'currency',      sp2.currency,
-          'unit',          sp2.unit,
-          'is_preferred',  sp2.is_preferred
-        )) FROM supplier_prices sp2
+          'supplier_id',   combined.supplier_id,
+          'supplier_name', combined.supplier_name,
+          'price_per_unit',combined.price_per_unit,
+          'currency',      combined.currency,
+          'unit',          combined.unit,
+          'is_preferred',  combined.is_preferred
+        )) FROM (
+          SELECT sp2.supplier_id, s2.name AS supplier_name,
+                 sp2.price_per_unit, sp2.currency, sp2.unit, sp2.is_preferred
+          FROM supplier_prices sp2
           JOIN suppliers s2 ON s2.id=sp2.supplier_id
           WHERE sp2.material_id=m.id
-          ORDER BY sp2.is_preferred DESC, sp2.price_per_unit ASC
+          UNION ALL
+          SELECT m.supplier_id AS supplier_id, s3.name AS supplier_name,
+                 NULL AS price_per_unit, 'EUR' AS currency, m.unit AS unit, 1 AS is_preferred
+          FROM suppliers s3
+          WHERE m.supplier_id IS NOT NULL
+            AND s3.id = m.supplier_id
+            AND NOT EXISTS (
+              SELECT 1 FROM supplier_prices sp3
+              WHERE sp3.material_id=m.id AND sp3.supplier_id=m.supplier_id
+            )
+          ORDER BY is_preferred DESC
+        ) combined
         ) AS all_prices_json
       FROM product_materials pm
       JOIN materials m ON m.id=pm.material_id
@@ -102,7 +118,7 @@ export function registerProductHandlers(): void {
       LEFT JOIN supplier_prices sp_pref ON sp_pref.material_id=m.id AND sp_pref.is_preferred=1
       LEFT JOIN suppliers s_pref ON s_pref.id=sp_pref.supplier_id
       WHERE pm.product_id=?
-      ORDER BY pm.sort_order
+      ORDER BY COALESCE(pm.sort_order, pm.id), pm.id
     `).all(id)
 
     // Varianten
@@ -168,11 +184,22 @@ export function registerProductHandlers(): void {
   // ── Reihenfolge tauschen (↑ / ↓) ──────────────────────────
   ipcMain.handle('products:reorderMaterial', (_e, productId: number, matId: number, direction: 'up' | 'down') => {
     const db = getDb()
+
+    // Step 1: Normalize ALL sort_orders for this product (sequential, no gaps, no ties)
+    const normalize = db.transaction(() => {
+      const rows = db.prepare(
+        `SELECT id FROM product_materials WHERE product_id=? ORDER BY COALESCE(sort_order,99999), id`
+      ).all(productId) as { id: number }[]
+      rows.forEach((r, i) => {
+        db.prepare(`UPDATE product_materials SET sort_order=? WHERE id=?`).run(i * 10, r.id)
+      })
+      return rows
+    })()
+
+    // Step 2: Re-read clean sorted list
     const mats = db.prepare(
-      `SELECT id, COALESCE(sort_order, id) AS ord
-       FROM product_materials
-       WHERE product_id=? AND is_active!=0
-       ORDER BY COALESCE(sort_order, id), id`
+      `SELECT id, sort_order AS ord FROM product_materials
+       WHERE product_id=? ORDER BY sort_order, id`
     ).all(productId) as { id: number; ord: number }[]
 
     const idx = mats.findIndex(m => m.id === matId)
@@ -230,10 +257,15 @@ export function registerProductHandlers(): void {
   ipcMain.handle('products:saveMaterial', (_e, productId: number, d: Record<string,unknown>) => {
     const db = getDb()
     if (d.id) {
+      // Aktuellen sort_order lesen (nie überschreiben wenn nicht explizit übergeben)
+      const currentRow = db.prepare(
+        `SELECT sort_order FROM product_materials WHERE id=? AND product_id=?`
+      ).get(d.id, productId) as { sort_order: number } | undefined
+      const keepOrder = d.sort_order !== undefined ? d.sort_order : (currentRow?.sort_order ?? 0)
       db.prepare(`UPDATE product_materials SET material_id=?,quantity=?,unit=?,
         waste_factor=?,sort_order=?,notes=? WHERE id=? AND product_id=?`).run(
         d.material_id, d.quantity, d.unit||'g',
-        d.waste_factor??0, d.sort_order??0, d.notes||null, d.id, productId)
+        d.waste_factor??0, keepOrder, d.notes||null, d.id, productId)
     } else {
       const maxOrder = (db.prepare(
         'SELECT MAX(sort_order) AS m FROM product_materials WHERE product_id=?'
